@@ -1,5 +1,5 @@
-# install_dir writes installable completion scripts and man pages, so it belongs on those two
-# features only, inside the module.
+# install_dir writes installable completion scripts, man pages and markdown pages, so it belongs
+# on those three features only, inside the module.
 version: 0.0.0
 generate:
   packages:
@@ -11,6 +11,10 @@ generate:
     - type: completion
       enabled: true
       install_dir: share
+    # Correct: markdown pages named <page>.md, for a docs site.
+    - type: markdown
+      enabled: true
+      install_dir: docs/cli
     # Escapes the module.
     - type: man
       enabled: true

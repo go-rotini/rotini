@@ -1,10 +1,19 @@
-spec: .rotini.spec.yaml:21:7: command taskr: example "taskr lst" does not parse: taskr: unknown command "lst"
-spec: .rotini.spec.yaml:22:7: command taskr: example "taskr list --colour" does not parse: taskr list: unknown flag "--colour"
-spec: .rotini.spec.yaml:23:7: command taskr: example "taskr list --status closed" does not parse: taskr list: invalid value "closed" for --status (one of: open, done)
-spec: .rotini.spec.yaml:24:7: command taskr: example "taskr add" does not parse: taskr add: missing required input: <title>
-spec: .rotini.spec.yaml:25:7: command taskr: example "taskr list --json --status open" does not parse: taskr list: flags --json and --status are mutually exclusive
-spec: .rotini.spec.yaml:26:7: command taskr: example "echo x | taskr add one two" does not parse: taskr add: accepts at most 1 argument (got 2)
-spec: .rotini.spec.yaml:27:7: command taskr: example "taskr --state s list" does not parse: taskr list: --state belongs to "taskr"
-warning: spec: .rotini.spec.yaml:34:22: command taskr: flag "help": is short_circuit but not cascading, so it applies only to "taskr": `taskr list --help` is a usage error; set `cascading: true` so every sub-command answers it
-warning: spec: .rotini.spec.yaml:40:41: command taskr: flag "state": is required but isn't cascading, so it applies only when `taskr` itself runs, not to its sub-commands (`taskr list` neither takes it nor requires it); set `cascading: true` if the sub-commands need it too
-warning: spec: .rotini.spec.yaml:28:7: command taskr: example "taskr add \"unclosed" has an unclosed quote
+spec: .rotini.spec.yaml:31:7: command taskr: example "taskr lst" does not parse: taskr: unknown command "lst"
+spec: .rotini.spec.yaml:32:7: command taskr: example "taskr list --colour" does not parse: taskr list: unknown flag "--colour"
+spec: .rotini.spec.yaml:33:7: command taskr: example "taskr list --status closed" does not parse: taskr list: invalid value "closed" for --status (one of: open, done)
+spec: .rotini.spec.yaml:34:7: command taskr: example "taskr add" does not parse: taskr add: missing required input: <title>
+spec: .rotini.spec.yaml:35:7: command taskr: example "taskr list --json --status open" does not parse: taskr list: flags --json and --status are mutually exclusive
+spec: .rotini.spec.yaml:36:7: command taskr: example "echo x | taskr add one two" does not parse: taskr add: accepts at most 1 argument (got 2)
+spec: .rotini.spec.yaml:37:7: command taskr: example "taskr --state s list" does not parse: taskr list: --state belongs to "taskr"
+warning: spec: .rotini.spec.yaml:44:22: command taskr: flag "help": is short_circuit but not cascading, so it applies only to "taskr": `taskr list --help` is a usage error; set `cascading: true` so every sub-command answers it
+warning: spec: .rotini.spec.yaml:50:41: command taskr: flag "state": is required but isn't cascading, so it applies only when `taskr` itself runs, not to its sub-commands (`taskr list` neither takes it nor requires it); set `cascading: true` if the sub-commands need it too
+warning: spec: .rotini.spec.yaml:21:7: command taskr: example "taskr list --status open; taskr old" uses a deprecated spelling (command "old" is deprecated: use list); show what to type now instead
+warning: spec: .rotini.spec.yaml:22:7: command taskr: example "taskr older" uses a deprecated spelling (command "older" is deprecated: use list); show what to type now instead
+warning: spec: .rotini.spec.yaml:22:7: command taskr: example "taskr older" uses "older", a hidden alias of command "old"; show a listed name (old)
+warning: spec: .rotini.spec.yaml:23:7: command taskr: example "taskr list --done --status finished" uses a deprecated spelling (flag "--status" value "finished" is deprecated); show what to type now instead
+warning: spec: .rotini.spec.yaml:23:7: command taskr: example "taskr list --done --status finished" uses a deprecated spelling (flag "--done" is deprecated: use --status done); show what to type now instead
+warning: spec: .rotini.spec.yaml:24:7: command taskr: example "taskr ls --fmt" uses "--fmt", a hidden identifier of flag "json"; show a listed one (--json)
+warning: spec: .rotini.spec.yaml:25:7: command taskr: example "taskr list --status archived" gives flag "status" the hidden value "archived"; show a listed value
+warning: spec: .rotini.spec.yaml:26:12: command taskr: example "taskr login --password hunter2 --key abc" gives the secret flag "password" a literal value, which would show in the process list and shell history; write a placeholder instead (--password <password>)
+warning: spec: .rotini.spec.yaml:26:12: command taskr: example "taskr login --password hunter2 --key abc" gives the secret flag "key" a literal value, which would show in the process list and shell history; write a placeholder instead (--key <key>)
+warning: spec: .rotini.spec.yaml:38:7: command taskr: example "taskr add \"unclosed" has an unclosed quote

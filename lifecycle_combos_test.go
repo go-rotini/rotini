@@ -353,9 +353,9 @@ func TestLifecycle_dependenciesAcrossHooks(t *testing.T) {
 		"c0.CascadingPreRun": func(_ context.Context, rtx *Context) {
 			rtx.SetDependencyIfAbsent(conn, &strings.Builder{})
 		},
-		"c2.Run": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(conn).WriteString("work") },
+		"c2.Run": func(_ context.Context, rtx *Context) { rtx.MustDependency(conn).WriteString("work") },
 		"c0.CascadingPostRun": func(_ context.Context, rtx *Context) {
-			seen = append(seen, rtx.MustGetDependency(conn).String())
+			seen = append(seen, rtx.MustDependency(conn).String())
 		},
 	})
 	if code, err := p.Run(argv); code != 0 || err != nil {
@@ -369,7 +369,7 @@ func TestLifecycle_dependenciesAcrossHooks(t *testing.T) {
 	}
 
 	p, argv, log, errs := comboTree(3, map[string]comboHook{
-		"c1.CascadingPreRun": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(conn) },
+		"c1.CascadingPreRun": func(_ context.Context, rtx *Context) { rtx.MustDependency(conn) },
 	})
 	code, err := p.Run(argv)
 	var de *DependencyError

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"reflect"
 	"sync"
 )
 
@@ -19,7 +18,7 @@ import (
 //	cmd.NewProgram().WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// any handler
-//	s := rtx.MustGetDependency(tasks.Store)
+//	s := rtx.MustDependency(tasks.Store)
 //
 // Registration happens at run time, so a missing registration is not a compile error; it is
 // reported when a handler requests the dependency.
@@ -28,7 +27,8 @@ import (
 //   - program-wide: [Program.WithDependency] or the [WithDependency] option, seeded into
 //     every run
 //   - one run: [Context.SetDependency] or [Context.SetDependencyIfAbsent] from a hook, visible
-//     to the hooks that run after it
+//     to the hooks that run after it, or a provider registered with [Program.WithProvider],
+//     which builds the run's value on first request and cleans it up when the run ends
 //
 // A handle whose name is known only at run time can be built as
 // rotini.NewDependency[any](name).
@@ -48,16 +48,13 @@ func (d Dependency[T]) Name() string { return d.name }
 // String implements [fmt.Stringer], returning the dependency's name.
 func (d Dependency[T]) String() string { return d.name }
 
-// WithDependency returns an [Option] that registers value under dep for the whole program; it
-// is the composable form of [Program.WithDependency], for use with [Program.With]:
+// WithDependency returns an [Option] that registers value under dep for the whole program.
 //
-//	cmd.NewProgram().
-//		With(
-//			rotini.WithDependency(tasks.Store, store),
-//			rotini.WithDependency(tasks.Client, client),
-//		).
-//		WithVersion(version).
-//		Execute()
+// Deprecated: use [Program.WithDependency]. A bundle of settings is an [Option] that calls it:
+//
+//	func deps(s *store.Store) rotini.Option {
+//		return func(p *rotini.Program) { p.WithDependency(tasks.Store, s) }
+//	}
 func WithDependency[T any](dep Dependency[T], value T) Option {
 	return func(p *Program) { p.WithDependency(dep, value) }
 }
@@ -87,15 +84,19 @@ func (p *Program) WithDependency[T any](dep Dependency[T], value T) *Program {
 	return p
 }
 
-// ErrDependencyNotFound is the sentinel for a dependency that is not registered, or is
-// registered as a different type. [Context.MustGetDependency] panics with a [*DependencyError]
-// wrapping it, which the runtime recovers and routes to the reporter.
+// ErrDependencyNotFound is the sentinel for a dependency that is not registered or provided,
+// or is registered as a different type. [Context.MustDependency] panics with a
+// [*DependencyError] wrapping it, which the runtime recovers and routes to the reporter.
 var ErrDependencyNotFound = errors.New("rotini: dependency not found")
 
-// DependencyError reports a dependency that was requested but not registered, or registered
-// as a different type. It unwraps to [ErrDependencyNotFound]; recover the name with errors.As.
+// DependencyError reports a dependency that was requested but not registered, registered as
+// a different type, or whose provider failed. It unwraps to [ErrDependencyNotFound], or to
+// the provider's error when that failed; recover the name with errors.As.
 type DependencyError struct {
 	Name string // the name the dependency was requested under
+
+	// err is the provider's error when the provider failed.
+	err error
 
 	// got and want are the registered and requested types when the name is registered as a
 	// different type, got "nil" for a nil registered as an interface; both are empty when
@@ -104,8 +105,11 @@ type DependencyError struct {
 }
 
 // Error returns a one-line message stating whether the dependency is missing, registered as
-// nil, or registered as a different type.
+// nil, registered as a different type, or failed in its provider, whose message it includes.
 func (e *DependencyError) Error() string {
+	if e.err != nil {
+		return fmt.Sprintf("rotini: the dependency %q could not be provided: %v", e.Name, e.err)
+	}
 	if e.got == "nil" {
 		return fmt.Sprintf("rotini: the dependency %q is registered as nil, not the %s requested", e.Name, e.want)
 	}
@@ -116,43 +120,50 @@ func (e *DependencyError) Error() string {
 }
 
 // Unwrap returns [ErrDependencyNotFound] and [ErrInternal], so [CategoryOf] classifies the
-// error as [CategoryInternal].
-func (e *DependencyError) Unwrap() []error { return []error{ErrDependencyNotFound, ErrInternal} }
-
-// GetDependency returns the value registered under dep and whether one is registered as type
-// T. It never panics.
-//
-//	client, ok := rtx.GetDependency(tasks.Client)
-func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
-	stored, registered := rtx.dependency(dep.name)
-	if v, ok := stored.(T); ok {
-		return v, true
+// error as [CategoryInternal]. When the provider failed it returns the provider's error in
+// place of ErrDependencyNotFound, so the error keeps that error's category, if it has one.
+func (e *DependencyError) Unwrap() []error {
+	if e.err != nil {
+		return []error{e.err, ErrInternal}
 	}
-	// A nil registered under an interface type is stored as a nil any, which no assertion
-	// matches.
-	var zero T
-	return zero, registered && stored == nil && reflect.TypeFor[T]().Kind() == reflect.Interface
+	return []error{ErrDependencyNotFound, ErrInternal}
 }
 
-// MustGetDependency returns the value registered under dep, or panics with a
-// [*DependencyError] when it is missing or not a T. The runtime recovers the panic during
+// LookupDependency returns the value of dep in this run and whether one is available as type T,
+// building it with dep's provider ([Program.WithProvider]) on first request. A provider's
+// error reads as unavailable and is not recorded; use [Context.Dependency] to get it.
+//
+//	client, ok := rtx.LookupDependency(tasks.Client)
+func (rtx *Context) LookupDependency[T any](dep Dependency[T]) (T, bool) {
+	v, _, err := lookupDependency(rtx, dep)
+	return v, err == nil
+}
+
+// Deprecated: use [Context.LookupDependency].
+func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
+	return rtx.LookupDependency(dep)
+}
+
+// MustDependency returns the value of dep in this run, building it with dep's provider
+// ([Program.WithProvider]) on first request, or panics with a [*DependencyError] when it is
+// missing, not a T, or its provider failed; for a failed provider the DependencyError wraps
+// the provider's error, which errors.As reaches. The runtime recovers the panic during
 // dispatch and routes it to the reporter.
 //
-//	s := rtx.MustGetDependency(tasks.Store)
-func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
-	v, ok := rtx.GetDependency(dep)
-	if !ok {
-		de := &DependencyError{Name: dep.name}
-		switch registered, found := rtx.dependency(dep.name); {
-		case registered != nil:
-			de.got, de.want = fmt.Sprintf("%T", registered), reflect.TypeFor[T]().String()
-		case found:
-			de.got, de.want = "nil", reflect.TypeFor[T]().String()
-		}
-		panic(de)
+//	s := rtx.MustDependency(tasks.Store)
+func (rtx *Context) MustDependency[T any](dep Dependency[T]) T {
+	v, failed, err := lookupDependency(rtx, dep)
+	switch {
+	case failed:
+		panic(&DependencyError{Name: dep.name, err: err})
+	case err != nil:
+		panic(err)
 	}
 	return v
 }
+
+// Deprecated: use [Context.MustDependency].
+func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T { return rtx.MustDependency(dep) }
 
 // SetDependency registers value under dep for this run, replacing any existing value, so hooks
 // that run later see it. Use it for per-run values such as a client built from the inputs;
@@ -166,7 +177,7 @@ func (rtx *Context) SetDependency[T any](dep Dependency[T], value T) {
 // that registered a double under the same name keeps the double.
 //
 //	rtx.SetDependencyIfAbsent(Clock, time.Now)
-//	now := rtx.MustGetDependency(Clock)
+//	now := rtx.MustDependency(Clock)
 func (rtx *Context) SetDependencyIfAbsent[T any](dep Dependency[T], value T) {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
@@ -197,11 +208,13 @@ func (rtx *Context) dependency(name string) (any, bool) {
 	return v, ok
 }
 
-// dependencyStore is the dependencies a program seeds each run with. Each run gets its own
-// copy, so a dependency set during a run stays local to it. It is safe for concurrent use.
+// dependencyStore is the dependencies a program seeds each run with, and its providers. Each
+// run gets its own copy of the values, so a dependency set during a run stays local to it. It
+// is safe for concurrent use.
 type dependencyStore struct {
-	mu sync.RWMutex
-	m  map[string]any
+	mu        sync.RWMutex
+	m         map[string]any
+	providers map[string]providerFunc
 }
 
 // set stores value under name, replacing any prior value.

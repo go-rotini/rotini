@@ -16,10 +16,10 @@ import (
 // acquire, inspect, reorder, or replace any channel individually:
 //
 //	defaults, _ := rtx.DefaultInputs[MycliInputs]()
-//	files, _    := rtx.FileInputs[MycliInputs]()
+//	config, _   := rtx.ConfigInputs[MycliInputs]()
 //	env, _      := rtx.EnvInputs[MycliInputs]()
 //	argv, _     := rtx.ArgvInputs[MycliInputs]()
-//	inputs, report := rotini.MergeInputsWithReport(defaults, files, env, argv)
+//	inputs, report := rotini.MergeInputsWithReport(defaults, config, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
 // FieldPath identifies one leaf field of a generated inputs struct by its dot-joined Go field
@@ -29,7 +29,7 @@ type FieldPath string
 // InputSource records which layer supplied a field's value and the raw text it supplied. Raw is
 // pre-redacted for inputs the spec marks secret.
 type InputSource struct {
-	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
+	Layer string // the supplying layer's name: "default", "config", "env", "argv", "stdin", or custom
 	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 	// Origin names where in the layer the value came from: "argv:--port" (the identifier as
 	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
@@ -90,12 +90,20 @@ type layerCore struct {
 	// shadowed is what a field's value overrode within the layer, low → high: the shared
 	// entries a profile's map replaced, which the report lists under the layer's own entry.
 	shadowed map[FieldPath][]InputSource
+	// reader and filePaths are what a merged report names inputs and files with, for
+	// [InputReport.Label], [InputReport.DeclaredSources] and [InputReport.Explain]: the reader
+	// the layer read with, and the file each configuration source was read from, by logical name.
+	reader    *InputReader
+	filePaths map[string]string
+	// configDocs is each configuration file the layer opened, for
+	// [InputReport.UnreadConfigKeys].
+	configDocs []openedDoc
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
 // Inputs acquires every declared channel (argv, environment, configuration files, the stdin
-// payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
+// payload, defaults), reconciles them in the standard precedence default < config < env < argv,
 // validates the result, and returns it. When a short-circuit flag ([FlagDef.ShortCircuit]) is
 // set on the command line, the declared requirements are waived, so the handler gets the
 // values read so far and can act on the flag. Under such a flag, a command line or environment
@@ -163,7 +171,7 @@ func inputsWithReport[T any](rtx *Context) (T, InputReport, error) {
 		return zero, InputReport{}, err
 	}
 	above.add(env.core)
-	files := InputLayer[T]{Name: "files"}
+	files := InputLayer[T]{Name: "config"}
 	files.Set, files.core, err = filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&files.Values).Elem(), above)
 	if err != nil {
 		return zero, InputReport{}, err
@@ -182,7 +190,7 @@ func inputsWithReport[T any](rtx *Context) (T, InputReport, error) {
 
 // ── channel acquisition ──────────────────────────────────────────────────────.
 
-// ArgvInputs parses the command line only — flags and positionals across the resolved chain,
+// ArgvInputs reads the command-line channel only — flags and positionals across the resolved chain,
 // exactly as supplied: no defaults, no fallback, and no required or enum validation. Validate
 // the overlaid result with [InputReport.Validate], so a required flag satisfied by another layer
 // passes. Parse failures are [*ParseError] values.
@@ -192,7 +200,7 @@ func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 	return InputLayer[T]{Name: "argv", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
-// EnvInputs acquires the environment channel: every Env input, by its explicit variable or the
+// EnvInputs reads the environment channel: every Env input, by its explicit variable or the
 // SNAKE_UPPER projection of its key, plus the env fallback of any flag or argument that declares
 // one. A missing required input or a constraint violation is this call's error.
 func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
@@ -201,17 +209,25 @@ func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
-// FileInputs acquires the configuration-files channel: every Config input from the
-// configuration files in scope for the command chain (the nearest command's first) and any
-// custom [InputSettings.Sources] after them, plus the config fallback of any flag or argument
-// that declares one. Required and constraint failures are this call's errors.
-func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
+// ConfigInputs reads the configuration channel: every Config input from the configuration
+// files in scope for the command chain (the nearest command's first) and any custom
+// [InputSettings.Sources] after them, plus the config fallback of any flag or argument that
+// declares one. Required and constraint failures are this call's errors. Its layer is named
+// "config".
+func (rtx *Context) ConfigInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem(), layerShadow{})
-	return InputLayer[T]{Name: "files", Values: t, Set: set, core: core}, rtx.withPath(err)
+	return InputLayer[T]{Name: "config", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
-// StdinInputs acquires the stdin channel: the leaf command's typed payload, decoded per its
+// FileInputs is [Context.ConfigInputs].
+//
+// Deprecated: use [Context.ConfigInputs].
+func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
+	return rtx.ConfigInputs[T]()
+}
+
+// StdinInputs reads the stdin channel: the leaf command's typed payload, decoded per its
 // declared format, schema-validated, and honoring required.
 func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 	var t T
@@ -219,13 +235,12 @@ func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 	return InputLayer[T]{Name: "stdin", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
-// DefaultInputs synthesizes the spec's declared defaults as an explicit layer, conventionally
-// the lowest. Flag and argument defaults come from the resolved chain; env and config defaults
-// from their recon tags.
+// DefaultInputs reads the spec's declared defaults as an explicit layer, conventionally the
+// lowest: the declared default of every flag, argument, env input and config input.
 func (rtx *Context) DefaultInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := defaultsLayer(rtx, reflect.ValueOf(&t).Elem())
-	return InputLayer[T]{Name: "defaults", Values: t, Set: set, core: core}, rtx.withPath(err)
+	return InputLayer[T]{Name: "default", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // ── overlay ──────────────────────────────────────────────────────────────────.
@@ -327,6 +342,8 @@ type InputReport struct {
 	// stdinSchemas check a hand-built stdin document; nil when no rotini layer supplied them.
 	stdinSchemas map[string]string
 	view         *osView // the run's environment and directory, from a rotini layer
+	names        *inputNames
+	configDocs   []openedDoc // the configuration files the config layer opened
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
@@ -407,7 +424,7 @@ func (r InputReport) Validate() error {
 
 // absorb folds one layer's validation core into the report: later layers' flag values replace
 // earlier ones scope by scope, the argv layer contributes positionals and the argv-set record,
-// and the defaults layer contributes its sparse argument defaults.
+// and the default layer contributes its sparse argument defaults.
 func (r *InputReport) absorb(core *layerCore) {
 	if core == nil {
 		return
@@ -443,9 +460,15 @@ func (r *InputReport) absorb(core *layerCore) {
 	if core.stdinSchemas != nil {
 		r.stdinSchemas = core.stdinSchemas
 	}
+	if core.configDocs != nil {
+		r.configDocs = core.configDocs
+	}
+	if core.reader != nil {
+		r.names = r.names.merge(core.reader.namesFor(core.chain, core.filePaths, core.view))
+	}
 	if core.view != nil {
 		r.view = core.view
-		r.store.dir = core.view.base()
+		r.store.view = core.view
 		r.store.clock = featureClock(core.view.clockRef().features())
 	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
@@ -498,7 +521,7 @@ func (r *InputReport) absorbScope(i int, src *scopeInputs) {
 	}
 }
 
-// finalize pads the merged positionals from the defaults layer, applying the Parser's gap
+// finalize pads the merged positionals from the default layer, applying the Parser's gap
 // rule: fill from the first unsupplied index, stopping at the first index without a default.
 func (r *InputReport) finalize() {
 	if r.store == nil || r.argDefs == nil || len(r.chain) == 0 {
@@ -592,7 +615,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq())
+	store, err := rtx.argvTokens(chain)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -625,7 +648,8 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
 	})
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
+	b := readerFor(rtx)
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: b.stdinSchemas, view: rtx.osView(), reader: b}, nil
 }
 
 // defaultsLayer synthesizes declared defaults into v and records presence.
@@ -669,7 +693,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			}
 			fd, _ := findFlagDef(frame.Flags, logical)
 			set[fieldPath(topName, "Flags", fieldName)] = InputSource{
-				Layer:  "defaults",
+				Layer:  "default",
 				Origin: "default",
 				Raw:    redactValue(fd.Default, fd.Secret),
 			}
@@ -690,7 +714,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				_ = coerceTime(f, []string{d}, argTimeSpec(&ad, rtx.osView().clockRef()))
 				secret := ad.Secret
 				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
-					Layer:  "defaults",
+					Layer:  "default",
 					Origin: "default",
 					Raw:    redactValue(d, secret),
 				}
@@ -708,14 +732,15 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				ts.clock = rtx.osView().clockRef()
 				_ = coerceTime(f, []string{d}, ts)
 				set[fieldPath(topName, channel, fieldName)] = InputSource{
-					Layer:  "defaults",
+					Layer:  "default",
 					Origin: "default",
 					Raw:    redactValue(d, reconHasSecret(body)),
 				}
 			})
 		}
 	})
-	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
+	b := readerFor(rtx)
+	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: b.stdinSchemas, view: rtx.osView(), reader: b}, nil
 }
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v. A registry is
@@ -727,7 +752,7 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow) 
 	}
 	view := rtx.osView().withFileCache()
 	overrides := map[string]pathOverride{}
-	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
+	if store, err := rtx.argvStore(chain); err == nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
 	if view, err = b.envFileView(rtx.features(), chain, v, overrides, argvWaived(rtx, chain), view); err != nil {
@@ -744,7 +769,11 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow) 
 		return nil, nil, err
 	}
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels, above)
+	set, core, err := channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels, above)
+	if core != nil {
+		core.reader = b
+	}
+	return set, core, err
 }
 
 // envRegistries builds the environment channel's registries for the inputs v describes: the
@@ -786,7 +815,7 @@ func envRegistries(b *InputReader, chain []Command, v reflect.Value, view *osVie
 // per-channel reader that does not otherwise parse argv. A command line that cannot be parsed
 // waives nothing: [Context.ArgvInputs] owns reporting it.
 func argvWaived(rtx *Context, chain []Command) bool {
-	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
+	store, err := rtx.argvStore(chain)
 	return err == nil && shortCircuited(chain, store)
 }
 
@@ -825,7 +854,14 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow
 	}
 	labels := cfg.labels()
 	labels.view = view
-	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels, above)
+	set, core, err := channelLayer(v, chain, anchor, "config", "Config", reg, reg, cfg, waived, labels, above)
+	if core != nil {
+		core.reader, core.filePaths = b, labels.files
+		if view.files != nil {
+			core.configDocs = view.files.docs
+		}
+	}
+	return set, core, err
 }
 
 // filesBootstrap is what the files channel reads before any configuration file: the chain, the
@@ -837,7 +873,7 @@ func filesBootstrap(b *InputReader, rtx *Context, v reflect.Value) (chain []Comm
 	}
 	view = rtx.osView().withFileCache()
 	boot.paths = map[string]pathOverride{}
-	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
+	store, perr := rtx.argvStore(chain)
 	if perr == nil {
 		boot.paths = b.pathOverrides(chain, store, view)
 		waived = shortCircuited(chain, store)
@@ -861,7 +897,7 @@ func filesBootstrap(b *InputReader, rtx *Context, v reflect.Value) (chain []Comm
 // does before it reads any value.
 func checkProfileLayer(b *InputReader, rtx *Context, v reflect.Value) error {
 	fs := rtx.features()
-	if fs.profiles == nil || !slices.ContainsFunc(b.configFiles, func(f ConfigFile) bool { return f.Profiles != nil }) {
+	if fs.profiles == nil || !slices.ContainsFunc(b.configFiles, func(f ConfigFileDef) bool { return f.Profiles != nil }) {
 		return nil
 	}
 	chain, view, boot, waived, err := filesBootstrap(b, rtx, v)
@@ -964,6 +1000,9 @@ func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci re
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
+	if err := checkTimeChannel(view.clockRef().features(), cs); err != nil {
+		return err
+	}
 	if cfg != nil {
 		// A pinned field reads only its own file, before it is expanded and checked.
 		if err := fillConfig(cs, cfg, waived); err != nil {
@@ -992,7 +1031,7 @@ func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci re
 	nested := map[string]bool{}
 	if structName == "Env" {
 		var err error
-		if nested, err = fillEnvNested(cs, view); err != nil {
+		if nested, err = fillNestedEnv(cs, view); err != nil {
 			return err
 		}
 	}
@@ -1100,14 +1139,14 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 		return nil, nil, err
 	}
 	args := func(name string) ([]string, error) {
-		store, err := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq())
+		store, err := rtx.argvTokens(chain)
 		if err != nil {
 			return nil, err
 		}
 		return leafArgValues(chain, store, name), nil
 	}
 	if _, err := layerAnchor(rtx, v, chain); err != nil {
-		if _, perr := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq()); perr != nil {
+		if _, perr := rtx.argvTokens(chain); perr != nil {
 			return nil, nil, perr // a malformed command line reports itself first
 		}
 		return nil, nil, err
@@ -1124,7 +1163,7 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 			}
 		}
 	}
-	return set, &layerCore{chain: chain, view: rtx.osView()}, nil
+	return set, &layerCore{chain: chain, view: rtx.osView(), reader: b}, nil
 }
 
 // stdinSet reports whether a Stdin field holds a payload: a non-nil pointer, or a non-nil

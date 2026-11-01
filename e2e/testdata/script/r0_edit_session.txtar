@@ -116,22 +116,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*demoGreetHandler)(nil)
+var _ rotini.HandlerE = (*demoGreetHandler)(nil)
 
 type demoGreetHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*demoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*demoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DemoGreetInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintf(rtx.Stdout, "hello, %s\n", inputs.DemoGreet.Flags.Name)
+	return nil
 }
 -- greet.yaml --
 version: 0.0.0

@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,5 +88,116 @@ func TestContext_PluginHelpFailure(t *testing.T) {
 	}
 	if NewContextFor(def, nil).PluginHelp("slow") {
 		t.Error("a Context outside a run ran a plugin")
+	}
+}
+
+// runUnknownHelp runs args against pluginHelpDef with pages for its commands, the help command
+// answering as the generated one does: PluginHelp, else HelpFor, recording HelpFor's error.
+func runUnknownHelp(t *testing.T, structured bool, args ...string) (code int, err error, stderr string) {
+	t.Helper()
+	def := pluginHelpDef()
+	pages := func(path ...string) (string, error) {
+		switch strings.Join(path, " ") {
+		case "", "help", "tools", "tools help":
+			return "page", nil
+		}
+		return "", UnknownCommandError(def, path...)
+	}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		words := rtx.Argv[1:]
+		if rtx.Argv[0] == "tools" {
+			words = rtx.Argv[2:]
+		}
+		if rtx.PluginHelp(words...) {
+			return
+		}
+		if _, err := rtx.HelpFor(words...); err != nil {
+			rtx.RecordError(err)
+		}
+	}}
+	p := NewProgram(def, h).WithArgs(args).WithHelp(pages)
+	if structured {
+		p.WithReporter(StructuredReporter(func(*Context) bool { return true }))
+	}
+	var errb strings.Builder
+	p.stdout, p.stderr = &strings.Builder{}, &errb
+	code, err = p.Run(p.args)
+	return code, err, errb.String()
+}
+
+// TestContext_HelpForUnknownCommand pins that `help <word>` naming no command fails as typing
+// the word as a command does: an unknown-command usage error reported against the deepest
+// command the words reach, with the words accepted there as candidates.
+func TestContext_HelpForUnknownCommand(t *testing.T) {
+	cases := []struct {
+		args       []string
+		msg        string
+		command    string
+		token      string
+		candidates []string
+	}{
+		{[]string{"help", "nope"}, `app: unknown command "nope"`, "app", "nope", []string{"help", "tools", "sync", "sy"}},
+		{[]string{"help", "tools", "nope"}, `app tools: unknown command "nope"`, "tools", "nope", []string{"help"}},
+		{[]string{"tools", "help", "nope"}, `app tools: unknown command "nope"`, "tools", "nope", []string{"help"}},
+		{[]string{"help", "help", "extra"}, `app help: unknown command "extra"`, "help", "extra", nil},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			code, err, stderr := runUnknownHelp(t, false, tc.args...)
+			pe, ok := errors.AsType[*ParseError](err)
+			if code != 1 || !ok || !errors.Is(err, ErrUsage) || pe.Kind != ParseKindUnknownCommand {
+				t.Fatalf("code %d, err %#v; want 1 and an unknown-command *ParseError", code, err)
+			}
+			if pe.Error() != tc.msg || pe.Command != tc.command || pe.Token != tc.token || !slices.Equal(pe.Candidates, tc.candidates) {
+				t.Errorf("got %q, Command %q, Token %q, Candidates %q", pe.Error(), pe.Command, pe.Token, pe.Candidates)
+			}
+			if want := "Error: " + tc.msg + "\n"; stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+		})
+	}
+
+	// The mistyped word reads the same typed as a command, which the parser rejects.
+	chain, _ := resolveChain(pluginHelpDef(), []string{"nope"})
+	direct := atCommand(strayCommand(&chain[0], &scopeInputs{args: []string{"nope"}}, nil), chain)
+	if viaHelp := UnknownCommandError(pluginHelpDef(), "nope"); direct.Error() != viaHelp.Error() {
+		t.Errorf("`app nope` = %v, `app help nope` = %v; want the same error", direct, viaHelp)
+	}
+
+	_, _, stderr := runUnknownHelp(t, true, "help", "nope")
+	for _, want := range []string{`"kind":"unknown-command"`, `"category":"usage"`, `"token":"nope"`, `"message":"app: unknown command \"nope\""`} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("structured report lacks %s:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestUnknownCommandError pins the error's shape at the edges: help topics are candidates at
+// the root only, a path whose every word names a command reports the last word, and a
+// passthrough command stops the walk.
+func TestUnknownCommandError(t *testing.T) {
+	def := Definition{
+		Name:   "app",
+		Topics: []TopicDef{{Name: "env"}},
+		Commands: []CommandDef{
+			{Name: "db", Aliases: []string{"d"}, Commands: []CommandDef{{Name: "migrate"}}},
+			{Name: "exec", Passthrough: true, Commands: []CommandDef{{Name: "inner"}}},
+		},
+	}
+	cases := []struct {
+		path       []string
+		msg        string
+		candidates []string
+	}{
+		{[]string{"nope"}, `app: unknown command "nope"`, []string{"db", "d", "exec", "env"}},
+		{[]string{"d", "nope"}, `app db: unknown command "nope"`, []string{"migrate"}},
+		{[]string{"db", "migrate"}, `app db: unknown command "migrate"`, []string{"migrate"}},
+		{[]string{"exec", "inner"}, `app exec: unknown command "inner"`, []string{"inner"}},
+	}
+	for _, tc := range cases {
+		err := UnknownCommandError(def, tc.path...)
+		if err.Error() != tc.msg || err.Kind != ParseKindUnknownCommand || !slices.Equal(err.Candidates, tc.candidates) {
+			t.Errorf("UnknownCommandError(%q) = %q, %v, %q; want %q, unknown-command, %q", tc.path, err, err.Kind, err.Candidates, tc.msg, tc.candidates)
+		}
 	}
 }

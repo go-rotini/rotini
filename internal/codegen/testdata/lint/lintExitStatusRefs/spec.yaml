@@ -1,0 +1,34 @@
+# A command lists one of the root's named exit statuses with `$ref`, and adds the root's list
+# to its own with `inherit: true`. A `$ref` names a declared one and stands alone, and
+# `inherit: true` stands alone, once, on a command other than the root.
+version: 0.0.0
+command:
+  name: demo
+  exit_statuses:
+    not_found: { code: 3, summary: no such task }
+    busy: { code: 4, summary: the store is locked, retryable: true }
+  exit_status:
+    - { code: 1, summary: an error }
+    # The root has no list above it to inherit.
+    - inherit: true
+  commands:
+    # Correct: the root's codes, plus two named ones, by name and as a pointer. No problem.
+    - name: get
+      exit_status:
+        - inherit: true
+        - $ref: not_found
+        - $ref: '#/exit_statuses/busy'
+    - name: run
+      exit_status:
+        # Not declared.
+        - $ref: not_fund
+        # A key beside the $ref.
+        - { $ref: busy, summary: the run lock is held }
+        # Twice.
+        - inherit: true
+        - inherit: true
+    - name: put
+      exit_status:
+        # Both in one item, and a code beside inherit.
+        - { inherit: true, $ref: busy }
+        - { inherit: true, code: 5 }

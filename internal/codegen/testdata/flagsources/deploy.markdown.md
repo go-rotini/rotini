@@ -12,7 +12,7 @@ app deploy [flags] <command> <target> [stage]
 
 ## Commands
 
-- `canary` — a canary deploy
+- [`canary`](app-deploy-canary.md) — a canary deploy
 
 ## Arguments
 
@@ -28,3 +28,13 @@ app deploy [flags] <command> <target> [stage]
 ## Global Flags
 
 - `--verbose` — say more; also set by `APP_LOG_VERBOSE` or config key `log.verbose`
+
+## Files
+
+The first file listed that sets a key supplies it.
+
+- `./deploy.yaml`
+
+## See Also
+
+- [app](app.md)

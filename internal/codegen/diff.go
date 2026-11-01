@@ -72,7 +72,7 @@ func (p *Processor) Diff(specPath, confPath, oldSource, newSource, release strin
 			return contractdiff.Report{}, p.explainDecodeFailure("conf", err)
 		}
 		if conf.path != "" {
-			if problems, _ := splitProblems(p.validateAndLintConf(conf)); len(problems) > 0 {
+			if problems, _ := splitProblems(p.validateAndLintConf(conf, false)); len(problems) > 0 {
 				return contractdiff.Report{}, errors.Join(problems...)
 			}
 		}

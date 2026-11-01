@@ -1,7 +1,10 @@
 package rotini
 
 import (
+	"errors"
+	"io"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -27,6 +30,20 @@ func runtimeConformanceCases() []dataCase {
 			} {
 				if win, _ := rep.Winner(path); win.Origin != want {
 					t.Errorf("%s origin = %q, want %q", path, win.Origin, want)
+				}
+			}
+		}},
+		{"CMD-01", func(t *testing.T) { // a short-circuit flag waives a mistyped sub-command; UnknownCommand reports it
+			for _, argv := range [][]string{{"config", "sett", "--help"}, {"config", "sett", "--version"}} {
+				p := NewProgram(scStrayDef(), scStrayHandlers{optOut: true}).WithHelp(func(...string) (string, error) { return "page", nil }).
+					WithStdout(io.Discard).WithStderr(io.Discard).WithoutSignalHandling()
+				if code, err := p.Run(argv); code != 0 || err != nil {
+					t.Errorf("%q: exit %d, %v; want the flag answered", argv, code, err)
+				}
+				err := NewContextFor(scStrayDef(), argv).UnknownCommand()
+				if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownCommand ||
+					pe.Error() != `app config: unknown command "sett"` || !slices.Equal(pe.Candidates, []string{"set"}) {
+					t.Errorf("%q: UnknownCommand() = %v; want app config: unknown command \"sett\"", argv, err)
 				}
 			}
 		}},

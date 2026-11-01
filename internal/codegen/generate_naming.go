@@ -107,7 +107,7 @@ func initialismCase(name string) string {
 			continue
 		}
 		word := string(r[start:i])
-		if upper := strings.ToUpper(word); goInitialisms[upper] {
+		if upper := strings.ToUpper(word); goInitialisms()[upper] {
 			word = upper
 		}
 		b.WriteString(word)
@@ -118,14 +118,55 @@ func initialismCase(name string) string {
 
 // goInitialisms are the initialisms written in capitals inside identifiers (golint's
 // commonInitialisms).
-var goInitialisms = map[string]bool{
-	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true, "DNS": true, "EOF": true,
-	"GUID": true, "HTML": true, "HTTP": true, "HTTPS": true, "ID": true, "IP": true, "JSON": true,
-	"LHS": true, "QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true, "SMTP": true,
-	"SQL": true, "SSH": true, "TCP": true, "TLS": true, "TTL": true, "UDP": true, "UI": true,
-	"UID": true, "UUID": true, "URI": true, "URL": true, "UTF8": true, "VM": true, "XML": true,
-	"XMPP": true, "XSRF": true, "XSS": true,
+func goInitialisms() map[string]bool {
+	return goInitialismsOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true, "DNS": true, "EOF": true,
+			"GUID": true, "HTML": true, "HTTP": true, "HTTPS": true, "ID": true, "IP": true, "JSON": true,
+			"LHS": true, "QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true, "SMTP": true,
+			"SQL": true, "SSH": true, "TCP": true, "TLS": true, "TTL": true, "UDP": true, "UI": true,
+			"UID": true, "UUID": true, "URI": true, "URL": true, "UTF8": true, "VM": true, "XML": true,
+			"XMPP": true, "XSRF": true, "XSS": true,
+		}
+	})
 }
+
+var goInitialismsOnce lazy[map[string]bool]
+
+// constCase respells the words of a PascalCase constant-name part that name formats and shells
+// as Go writes them: "FormatYaml" -> "FormatYAML", "ShellPowershell" -> "ShellPowerShell",
+// "Ok" -> "OK". It applies to generated enum, name and exit constants only; struct fields and
+// types keep [toPascalCase]'s spelling.
+func constCase(name string) string {
+	r := []rune(name)
+	var b strings.Builder
+	start := 0
+	for i := 1; i <= len(r); i++ {
+		if i < len(r) && (!unicode.IsUpper(r[i]) || unicode.IsUpper(r[i-1])) {
+			continue
+		}
+		word := string(r[start:i])
+		if spelled, ok := constWords()[word]; ok {
+			word = spelled
+		}
+		b.WriteString(word)
+		start = i
+	}
+	return b.String()
+}
+
+// constWords maps a PascalCased word to its spelling in a constant name.
+func constWords() map[string]string {
+	return constWordsOnce.value(func() map[string]string {
+		return map[string]string{
+			"Csv": "CSV", "Hcl": "HCL", "Ini": "INI", "Jsonc": "JSONC", "Jsonl": "JSONL",
+			"Ndjson": "NDJSON", "Ok": "OK", "Powershell": "PowerShell", "Toml": "TOML",
+			"Tsv": "TSV", "Yaml": "YAML",
+		}
+	})
+}
+
+var constWordsOnce lazy[map[string]string]
 
 // lowerFirst returns s as an unexported identifier, lower-casing its first rune or its whole
 // leading capital run: "APIResources" -> "apiResources", "URL" -> "url".
@@ -152,30 +193,34 @@ func lowerFirst(s string) string {
 
 // goReservedFilenames are the trailing "_"-separated file name tokens the go tool treats
 // specially: "test", and the GOOS and GOARCH names, which imply a build constraint.
-var goReservedFilenames = func() map[string]bool {
-	m := map[string]bool{}
-	for _, s := range []string{
-		"test",
-		// GOOS
-		"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
-		"ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris",
-		"wasip1", "windows", "zos",
-		// GOARCH
-		"386", "amd64", "amd64p32", "arm", "arm64", "arm64be", "armbe", "loong64",
-		"mips", "mips64", "mips64le", "mips64p32", "mips64p32le", "mipsle", "ppc",
-		"ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64",
-		"wasm",
-	} {
-		m[s] = true
-	}
-	return m
-}()
+func goReservedFilenames() map[string]bool {
+	return goReservedFilenamesOnce.value(func() map[string]bool {
+		m := map[string]bool{}
+		for _, s := range []string{
+			"test",
+			// GOOS
+			"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
+			"ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris",
+			"wasip1", "windows", "zos",
+			// GOARCH
+			"386", "amd64", "amd64p32", "arm", "arm64", "arm64be", "armbe", "loong64",
+			"mips", "mips64", "mips64le", "mips64p32", "mips64p32le", "mipsle", "ppc",
+			"ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64",
+			"wasm",
+		} {
+			m[s] = true
+		}
+		return m
+	})
+}
+
+var goReservedFilenamesOnce lazy[map[string]bool]
 
 // reservedTrailingToken reports whether stem's trailing "_"-separated token is in
 // goReservedFilenames.
 func reservedTrailingToken(stem string) bool {
 	parts := strings.Split(stem, "_")
-	return goReservedFilenames[parts[len(parts)-1]]
+	return goReservedFilenames()[parts[len(parts)-1]]
 }
 
 // stubFilename builds a handler-stub file name from base. A reserved trailing token gets a

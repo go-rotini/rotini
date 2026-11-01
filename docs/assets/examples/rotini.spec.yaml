@@ -9,6 +9,8 @@ command:
   usage: deploy [flags] <command>
   examples:
     - deploy ship api --env prod
+    - run: deploy ship web --env staging
+      summary: Ship the web app to staging
   groups:
     - name: Deploying
       description: Commands that change what runs where.
@@ -23,18 +25,27 @@ command:
     cascading: "Global Flags:"
     environment: "Environment:"
     configuration: "Configuration:"
+    files: "Files:"
     stdin: "Stdin:"
     output: "Output:"
     examples: "Examples:"
     topics: "Help Topics:"
+    see_also: "See Also:"
   topics:
     - name: environment
       summary: the environment variables deploy reads
       generate: environment
+    - name: configuration
+      summary: the configuration files and keys deploy reads
+      generate: configuration
     - name: targets
       summary: how targets are written
       body: A target is a host and an optional port.
-  see_also: [kubectl, helm]
+  see_also:
+    - kubectl(1)
+    - { command: ship }
+    - { topic: targets }
+    - { url: https://example.com/deploy }
   exit_status:
     - code: 0
       summary: success
@@ -46,6 +57,13 @@ command:
       output: { type: array, items: { $ref: "#/schemas/Target" } }
       retryable: true
       docs_url: https://example.com/deploy/partial
+  exit_statuses:
+    locked:
+      code: 4
+      summary: another deploy holds the lock
+      output: { type: object, properties: { holder: { type: string } } }
+      retryable: true
+      docs_url: https://example.com/deploy/locked
   env_prefix: DEPLOY
   schemas:
     Target:
@@ -141,7 +159,27 @@ command:
         type: object
         properties:
           digest: { type: string }
+        additionalProperties: false
   response_files: { prefix: "+" }
+  channels:
+    - name: skipped_host
+      class: warning
+      summary: a target host the rollout didn't reach
+      schema:
+        type: object
+        properties:
+          host: { type: string }
+          reason: { type: string }
+        required: [host]
+    - name: conflict
+      class: error
+      summary: two services claim one target
+      schema:
+        type: object
+        properties:
+          message: { type: string }
+          target: { $ref: Target }
+        required: [message]
   commands:
     - name: ship
       aliases: [s, push]
@@ -149,6 +187,9 @@ command:
       deprecated_identifiers_removed_in: { push: 2.0.0 }
       summary: ship a service
       group: Deploying
+      exit_status:
+        - inherit: true
+        - $ref: locked
       deprecated: use ship
       effects: { kind: write, idempotent: true, open_world: true }
       metadata: { owner: platform-team }

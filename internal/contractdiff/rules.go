@@ -21,6 +21,9 @@ const (
 	RuleResponseFilesAdded         = "RESPONSE_FILES_ADDED"
 	RuleResponseFilesPrefixChanged = "RESPONSE_FILES_PREFIX_CHANGED"
 	RuleResponseFilesRemoved       = "RESPONSE_FILES_REMOVED"
+	RuleChannelNoDelete            = "CHANNEL_NO_DELETE"
+	RuleChannelAdded               = "CHANNEL_ADDED"
+	RuleChannelClassChanged        = "CHANNEL_CLASS_CHANGED"
 
 	// Commands.
 
@@ -254,6 +257,7 @@ var catalog = []string{
 	RuleRootRenamed, RuleErrorsChanged, RuleMulticallNoDelete, RuleMulticallChanged, RuleMulticallAdded,
 	RuleTopicRemoved, RuleTopicAdded, RuleCompletionEnvRemoved, RuleCompletionEnvChanged, RuleCompletionEnvAdded,
 	RuleResponseFilesAdded, RuleResponseFilesPrefixChanged, RuleResponseFilesRemoved,
+	RuleChannelNoDelete, RuleChannelAdded, RuleChannelClassChanged,
 
 	RuleCommandNoDelete, RuleCommandReplaced, RuleCommandRenamedAliasKept, RuleCommandAdded, RuleCommandHidden,
 	RuleCommandUnhidden, RuleAliasNoDelete, RuleAliasAdded, RuleHiddenAliasNoDelete, RuleHiddenAliasAdded,

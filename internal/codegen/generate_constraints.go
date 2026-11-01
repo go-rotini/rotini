@@ -76,12 +76,16 @@ func valueConstraintText(b *BaseSchema, elem string) [][2]string {
 	if c, rule := rangeConstraint(b, elem); c != "" {
 		out = append(out, [2]string{c, rule})
 	}
-	if b.MultipleOf != nil {
+	// Every integer is a multiple of 1, so saying so tells the user nothing.
+	if b.MultipleOf != nil && !(integerType(elem) && bound(b.MultipleOf) != nil && *bound(b.MultipleOf) == 1) {
 		m := formatBoundValue(b.MultipleOf, elem)
 		out = append(out, [2]string{"multiple of " + m, "a multiple of " + m})
 	}
 	maxLen := b.MaxLength
 	switch {
+	case b.MinLength > 0 && maxLen != nil && b.MinLength == *maxLen:
+		exactly := fmt.Sprintf("exactly %d %s", b.MinLength, plural(b.MinLength, "character"))
+		out = append(out, [2]string{exactly, exactly})
 	case b.MinLength > 0 && maxLen != nil:
 		out = append(out, [2]string{fmt.Sprintf("length %d..%d", b.MinLength, *maxLen), fmt.Sprintf("%d to %d characters", b.MinLength, *maxLen)})
 	case b.MinLength > 0:
@@ -123,6 +127,9 @@ func rangeConstraint(b *BaseSchema, elem string) (compact, rule string) {
 // countConstraint renders minItems and maxItems: `2..5 values` / "2 to 5 values".
 func countConstraint(minItems int, maxItems *int) (compact, rule string) {
 	switch {
+	case minItems > 0 && maxItems != nil && minItems == *maxItems:
+		exactly := fmt.Sprintf("exactly %d %s", minItems, plural(minItems, "value"))
+		return exactly, exactly
 	case minItems > 0 && maxItems != nil:
 		return fmt.Sprintf("%d..%d values", minItems, *maxItems), fmt.Sprintf("%d to %d values", minItems, *maxItems)
 	case minItems > 0:
@@ -159,6 +166,15 @@ func shortDuration(d time.Duration) string {
 		s = strings.TrimSuffix(s, "0m")
 	}
 	return s
+}
+
+// integerType reports whether a Go type name, as getSchemaType gives it, is an integer.
+func integerType(t string) bool {
+	switch t {
+	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64":
+		return true
+	}
+	return false
 }
 
 func plural(n int, word string) string {

@@ -1,0 +1,17 @@
+# One exit code means one thing across the program.
+version: 0.0.0
+command:
+  name: demo
+  exit_status:
+    - { code: 0, summary: success }
+    - { code: 3, name: not_found, summary: no such task }
+  commands:
+    # Correct: the same code with the same name, and a code of its own. No problem.
+    - name: get
+      exit_status:
+        - { code: 3, name: not_found, summary: no such task }
+        - { code: 4, name: locked, summary: the task is locked }
+    # Wrong: code 3 named differently.
+    - name: remove
+      exit_status:
+        - { code: 3, name: missing, summary: no such task }

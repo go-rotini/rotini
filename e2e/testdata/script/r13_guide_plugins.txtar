@@ -12,14 +12,14 @@ mkdir plugins/bin
 mkdir pathbin
 exec go build -o bin/plug$exe ./cmd/plug
 exec go build -o echobin$exe ./echo
-cp echobin$exe bin/plug-sync$exe
-cp echobin$exe plugins/bin/plug-hello$exe
-cp echobin$exe bin/plug-dup$exe
-cp echobin$exe plugins/bin/plug-dup$exe
-cp echobin$exe pathbin/plug-dup$exe
-cp echobin$exe plugins/bin/plug-mid$exe
-cp echobin$exe pathbin/plug-mid$exe
-cp echobin$exe pathbin/plug-far$exe
+exec go build -o bin/plug-sync$exe ./echo
+exec go build -o plugins/bin/plug-hello$exe ./echo
+exec go build -o bin/plug-dup$exe ./echo
+exec go build -o plugins/bin/plug-dup$exe ./echo
+exec go build -o pathbin/plug-dup$exe ./echo
+exec go build -o plugins/bin/plug-mid$exe ./echo
+exec go build -o pathbin/plug-mid$exe ./echo
+exec go build -o pathbin/plug-far$exe ./echo
 env PATH=$WORK${/}pathbin${:}$PATH
 
 # A declared plugin runs <program>-<name>, under its alias too.
@@ -57,14 +57,14 @@ stderr '^Error: "plug-report" not found; searched next to the binary .*bin, then
 
 # A token holding a path separator, or . or .., is never a discovered plugin.
 mkdir plugins/bin/plug-sub
-cp echobin$exe plugins/bin/plug-sub/run$exe
+exec go build -o plugins/bin/plug-sub/run$exe ./echo
 exec bin/plug$exe sub/run
 ! stdout 'got'
 exec bin/plug$exe ..
 ! stdout 'got'
 
 # A word that differs only in case from a declared plugin is an unknown command, never looked up.
-cp echobin$exe bin/plug-SYNC$exe
+exec go build -o bin/plug-SYNC$exe ./echo
 wantexit 1 bin/plug$exe SYNC
 stderr 'unknown command "SYNC"'
 ! stdout 'got'

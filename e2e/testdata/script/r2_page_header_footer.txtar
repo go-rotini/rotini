@@ -13,7 +13,7 @@ exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yam
 grep '(?s)\A\.ship is final\.\n\nRead the runbook first\.\n\nship a service\n.*\n  app deploy -r 3\n\nReport problems upstream\.\z' internal/cmd/app/renders/help_app_deploy.txt
 
 # Markdown: the header under the title, the footer last.
-grep '(?s)\A# app deploy\n\n\.ship is final\.\n\nRead the runbook first\.\n\nship a service\n.*at least 1\n.*```\n\nReport problems upstream\.\z' internal/cmd/app/renders/markdown_app_deploy.md
+grep '(?s)\A# app deploy\n\n\.ship is final\.\n\nRead the runbook first\.\n\nship a service\n.*at least 1\n.*```\n\n## See Also\n\n- \[app\]\(app\.md\)\n\nReport problems upstream\.\z' internal/cmd/app/renders/markdown_app_deploy.md
 
 # Man: the header opens DESCRIPTION (a leading "." escaped), the footer is NOTES before
 # EXAMPLES, and the bound is a sentence with no short note beside the summary.

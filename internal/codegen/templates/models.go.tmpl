@@ -14,6 +14,9 @@ import (
 
 type {{.Type}} struct {
 {{- range .Fields}}
+{{- range .Doc}}
+	{{.}}
+{{- end}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
@@ -23,6 +26,9 @@ type {{.Type}} struct {
 {{if or .Flags .Embeds}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
+{{- range .Doc}}
+	{{.}}
+{{- end}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 {{- range .Embeds}}
@@ -35,6 +41,9 @@ type {{.Prefix}}Flags struct{}
 {{if .Arguments}}
 type {{.Prefix}}Arguments struct {
 {{- range .Arguments}}
+{{- range .Doc}}
+	{{.}}
+{{- end}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
@@ -45,6 +54,9 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
+{{- range .Doc}}
+	{{.}}
+{{- end}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
@@ -53,6 +65,9 @@ type {{.Prefix}}Env struct {
 
 type {{.Prefix}}Config struct {
 {{- range .Config}}
+{{- range .Doc}}
+	{{.}}
+{{- end}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
@@ -84,5 +99,8 @@ type {{.Prefix}}Inputs struct {
 {{.}}
 {{end}}
 {{- with .ExitCodes}}
+{{.}}
+{{end}}
+{{- with .Constants}}
 {{.}}
 {{end}}

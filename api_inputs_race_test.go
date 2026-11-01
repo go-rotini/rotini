@@ -71,10 +71,10 @@ func TestConcurrentRunsAndAccessors(t *testing.T) {
 			var wg sync.WaitGroup
 			for range 4 {
 				wg.Go(func() {
-					if v, _ := rtx.GetDependency(perRun); v != n {
+					if v, _ := rtx.LookupDependency(perRun); v != n {
 						bad.Add(1)
 					}
-					if v := rtx.MustGetDependency(shared); v != "s" {
+					if v := rtx.MustDependency(shared); v != "s" {
 						bad.Add(1)
 					}
 					if v, _ := rtx.LookupEnv("RACE_KEY"); v != "k" {

@@ -1,5 +1,7 @@
 package rotini
 
+import "io/fs"
+
 // WithEnviron sets the environment a run reads, in exec.Cmd.Env's KEY=value form: env
 // inputs, flag env fallbacks, config_source variables, $VAR and ~ in configuration paths and in
 // inputs that declare expand, the XDG and home directories ([AppDirs] included), plugin lookup
@@ -28,7 +30,8 @@ func (p *Program) WithEnviron(env []string) *Program {
 // directory. A relative dir is made absolute when the run starts.
 //
 // Rotini can't change the working directory for one run, so handlers still run in the
-// process's. A handler that opens a relative path joins it first:
+// process's. A handler opens a relative path with [OpenInput], which resolves it, or joins it
+// first:
 //
 //	f, err := os.Open(filepath.Join(rtx.Dir(), inputs.Deploy.Flags.Manifest))
 //
@@ -37,6 +40,53 @@ func (p *Program) WithEnviron(env []string) *Program {
 func (p *Program) WithDir(dir string) *Program {
 	p.view = p.view.withDir(dir)
 	return p
+}
+
+// WithFS sets the file system a run reads and writes its files through: configuration files
+// (discovery and walk-up searches included), `.env` files and variable_file values, response
+// files, `@file` values, the existingfile, existingdir, inputfile and outputfile checks, glob
+// arguments on Windows, [OpenInput], [CreateOutput], and the config writes. nil (the default),
+// or [OSFS], is the operating system's, read and written exactly as with no file system set.
+//
+// Paths keep their meaning: a relative path resolves against the run's directory
+// ([Program.WithDir]), and fsys is given the absolute path as an [fs.FS] name, its slash form
+// without the leading separator: /work/app.yaml is "work/app.yaml" and the root is ".". On
+// Windows the volume is the first element: C:\work\app.yaml is "C:/work/app.yaml", and
+// \\host\share\app.yaml is "host/share/app.yaml". An [fs.FS] that also implements
+// [fs.ReadLinkFS] has its symbolic links followed where rotini follows them. A Windows device
+// (NUL, CON, COM1, …) is never fsys's: it is read and written through the operating system, as
+// with no file system set.
+//
+// Writes need a [WriteFS]. With any other fsys, the config writes fail with an [*InputError] of
+// kind [InputErrorKindWriteRefused], and CreateOutput with an error matching
+// [errors.ErrUnsupported].
+//
+// What rotini doesn't read as a file stays the operating system's: plugin discovery and
+// execution, which run programs, the time zone database, signals, the terminal and the
+// process's own standard streams.
+//
+// An in-memory file system runs a command against files that exist nowhere on disk:
+//
+//	fsys := fstest.MapFS{"work/app.yaml": {Data: []byte("region: eu\n")}}
+//	code, err := cmd.NewProgram().WithFS(fsys).WithDir("/work").Run([]string{"deploy"})
+//
+// and [LayerFS] puts files embedded in the binary under the real file system.
+func (p *Program) WithFS(fsys fs.FS) *Program {
+	p.view = p.view.withFS(fsys)
+	return p
+}
+
+// WithFS sets the file system [Context.Inputs] and its siblings read, and [OpenInput],
+// [CreateOutput] and the config writes use. See [Program.WithFS]. It is for a Context built with
+// [NewContextFor]; during a run, the change lasts for the rest of that run.
+func (rtx *Context) WithFS(fsys fs.FS) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.view = rtx.view.withFS(fsys)
+		bindChainView(rtx.chain, rtx.view)
+		rtx.mu.Unlock()
+	}
+	return rtx
 }
 
 // LookupEnv reads one variable of the run's environment ([Program.WithEnviron]): the process

@@ -917,6 +917,7 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 	sub := func(extra string) string { return "  commands:\n    - name: run\n" + extra }
 	schemas := "  schemas:\n    Task:\n      type: object\n      required: [id]\n      properties:\n        id: {type: integer}\n        status: {type: string, enum: [open, done]}\n"
 	out := func(body string) string { return sub("      output:\n" + body) }
+	rootExits := "  exit_status:\n    - {code: 1, summary: failed}\n    - {code: 2, summary: usage}\n    - {code: 3, summary: not found}\n"
 	runDiffCases(t, []diffCase{
 		{
 			name: "stdin added", old: sub(""), new: sub("      stdin: {format: text}\n"),
@@ -1018,6 +1019,49 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 		{
 			name: "stream changed", old: out("        type: object\n"), new: sub("      output: {type: object}\n      output_stream: true\n"),
 			want: []string{"breaking OUTPUT_STREAM_CHANGED app run output"},
+		},
+		{
+			// A command without its own exit_status documents the root's; its own list replaces it.
+			name: "inherited exit statuses replaced by an own list",
+			old:  rootExits + sub(""),
+			new:  rootExits + sub("      exit_status:\n        - {code: 4, summary: busy}\n"),
+			want: []string{
+				"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 1",
+				"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 2",
+				"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 3",
+				"safe EXIT_STATUS_ADDED app run exit 4",
+			},
+		},
+		{
+			// `inherit: true` keeps the root's codes beside the command's own.
+			name: "inherited exit statuses added to",
+			old:  rootExits + sub(""),
+			new:  rootExits + sub("      exit_status:\n        - inherit: true\n        - {code: 4, summary: busy}\n"),
+			want: []string{"safe EXIT_STATUS_ADDED app run exit 4"},
+		},
+		{
+			// A root code the command lists itself is its own entry.
+			name: "inherited exit status overridden",
+			old:  rootExits + sub("      exit_status:\n        - inherit: true\n"),
+			new:  rootExits + sub("      exit_status:\n        - inherit: true\n        - {code: 3, summary: no such task}\n"),
+			want: []string{"possibly_breaking EXIT_SUMMARY_CHANGED app run exit 3"},
+		},
+		{
+			// A named exit status is the entry written out.
+			name: "exit status moved to a named one",
+			old:  sub("      exit_status:\n        - {code: 3, name: not_found, summary: not found}\n"),
+			new:  "  exit_statuses:\n    not_found: {code: 3, summary: not found}\n" + sub("      exit_status:\n        - $ref: not_found\n"),
+		},
+		{
+			name: "inherited exit statuses written out as its own",
+			old:  rootExits + sub(""),
+			new:  rootExits + sub("      exit_status:\n        - {code: 1, summary: failed}\n        - {code: 2, summary: usage}\n        - {code: 3, summary: not found}\n"),
+		},
+		{
+			name: "root exit status removed",
+			old:  rootExits + sub(""),
+			new:  "  exit_status:\n    - {code: 1, summary: failed}\n    - {code: 2, summary: usage}\n" + sub(""),
+			want: []string{"possibly_breaking EXIT_STATUS_NO_DELETE app exit 3", "possibly_breaking EXIT_STATUS_NO_DELETE app run exit 3"},
 		},
 		{
 			name: "exit status removed and added",

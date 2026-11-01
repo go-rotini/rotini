@@ -13,7 +13,7 @@
          .AllowedTools    Claude Code rules for the read-only leaf commands ("" for none)
          .Commands[]      the commands offered to agents, root first:
                           {.Invocation .Summary .Description .Aliases .Effects .Kind .Stability
-                          .Deprecated .JSON .DryRun .Confirm .Examples .ExitStatus .Link}.
+                          .Deprecated .JSON .DryRun .Confirm .Examples .ExampleRows .ExitStatus .Link}.
                           .Effects is the worst case over the command and its flags, in words,
                           and .Kind its kind (read, write, destructive, or "" when undeclared);
                           .JSON is what to add for JSON output; .DryRun and .Confirm are flags;
@@ -103,9 +103,10 @@ allowed-tools: {{quote .}}
 {{- with .Link}}
 - Reference: [{{.}}]({{.}})
 {{- end}}
-{{with .Examples}}
+{{with .ExampleRows}}
 ```
-{{range .}}{{.}}
+{{range .}}{{with .Summary}}# {{.}}
+{{end}}{{.Run}}
 {{end}}```
 {{end}}
 {{- end}}

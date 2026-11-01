@@ -4,5 +4,10 @@ the environment variables ops reads
 
 ## Environment
 
+- `OPS_DEPLOY_REPLICAS` `int` — how many to run (default `1`, used by: ops deploy)
 - `OPS_LOG` `string` — the log level (used by: ops)
 - `OPS_TOKEN` `string` — the API token (used by: ops)
+
+## See Also
+
+- [ops](ops.md)

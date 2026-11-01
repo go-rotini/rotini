@@ -1,0 +1,26 @@
+# A format rotini doesn't ship is the program's own, added with rotini.Codec, which generate
+# can't wire: each is a warning, so a typo of a built-in name is noticed. Built-in names pass.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: app
+      path: app.ini
+      format: ini
+    - name: user
+      path: user.yaml
+      format: yaml
+    - name: typo
+      path: typo.yaml
+      format: yml
+  config:
+    - name: region
+      schema: {type: string}
+  commands:
+    - name: apply
+      stdin:
+        format: hcl
+        schema: {type: object, properties: {name: {type: string}}}
+    - name: upper
+      stdin:
+        format: text

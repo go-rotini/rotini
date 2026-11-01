@@ -34,12 +34,13 @@ func nodeUsage(parent string, n rnode) string {
 
 // usageFuncDecl renders the generated Usage function: one case per command, hidden ones
 // included, keyed like Help by every name and alias permutation of its path (hidden aliases
-// too, as the command line accepts them).
-func usageFuncDecl(gp *program) string {
+// too, as the command line accepts them). def is the expression that reads the definition.
+func usageFuncDecl(gp *program, def string) string {
 	var b strings.Builder
 	b.WriteString("// Usage returns the usage line of the command identified by path (command names or\n")
-	b.WriteString("// aliases; no arguments for the root), or an error when path names no command. A handler\n")
-	b.WriteString("// uses rtx.Usage() instead, which is right for a composed command too.\n")
+	b.WriteString("// aliases; no arguments for the root), or an unknown-command [*rotini.ParseError] when path\n")
+	b.WriteString("// names no command. A handler uses rtx.Usage() instead, which is right for a composed\n")
+	b.WriteString("// command too.\n")
 	fmt.Fprintf(&b, "func Usage(path ...string) (string, error) {\n\tswitch %s {\n", resolverSwitch(treeHasAliases(gp.tree)))
 	fmt.Fprintf(&b, "\tcase \"\":\n\t\treturn %q, nil\n", rootUsage(gp))
 	var walk func(nodes []rnode, chain [][]string, invocation string)
@@ -56,7 +57,9 @@ func usageFuncDecl(gp *program) string {
 		}
 	}
 	walk(gp.tree, nil, gp.rootDisplay)
-	b.WriteString("\tdefault:\n\t\treturn \"\", fmt.Errorf(\"no usage for command %q\", strings.Join(path, \" \"))\n\t}\n}\n")
+	b.WriteString("\tdefault:\n\t\treturn \"\", rotini.UnknownCommandError(")
+	b.WriteString(def)
+	b.WriteString(", path...)\n\t}\n}\n")
 	return b.String()
 }
 

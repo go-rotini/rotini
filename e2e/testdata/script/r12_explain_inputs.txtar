@@ -1,6 +1,6 @@
 # R12 — the guide's parse explanation: a hidden short-circuit flag prints where each input's
-# value came from, even on a command line still missing a required argument. deploy.go.txt is
-# the handler block the guide shows.
+# value came from, in the user's words, even on a command line still missing a required
+# argument. deploy.go.txt is the handler block the guide shows.
 
 gomodinit example.com/todo
 
@@ -12,16 +12,16 @@ exec go build -o todo$exe ./cmd/todo
 env TODO_PORT=9000
 env TODO_TOKEN_FILE=token.txt
 exec ./todo$exe deploy prod --explain-inputs
-stdout '^TodoDeploy\.Arguments\.Target = "prod" from argv:<target>$'
-stdout '^TodoDeploy\.Flags\.Port = "9000" from env:TODO_PORT; overrides config:user#deploy\.port "8000", default "8080"$'
-stdout '^TodoDeploy\.Flags\.Token = \[redacted\] from env:TODO_TOKEN_FILE$'
+stdout '^<target> = "prod" from the command line$'
+stdout '^--port = "9000" from TODO_PORT \(overrides "8000" from deploy\.port in todo\.yaml, "8080" from default\)$'
+stdout '^--token = \[redacted\] from the file TODO_TOKEN_FILE names$'
 ! stdout s3cret
 
 # The required argument is waived for the explanation, and the token typed on the command line
 # wins over the file.
 exec ./todo$exe deploy --explain-inputs --token typed
-stdout '^TodoDeploy\.Flags\.Token = \[redacted\] from argv:--token; overrides env:TODO_TOKEN_FILE \[redacted\]$'
-! stdout 'Arguments\.Target'
+stdout '^--token = \[redacted\] from the command line \(overrides \[redacted\] from the file TODO_TOKEN_FILE names\)$'
+! stdout '<target>'
 
 # The guide's sample, byte for byte.
 env TODO_TOKEN_FILE=
@@ -33,10 +33,10 @@ cmp stdout explain.txt
 stderr 'target'
 
 -- explain.txt --
-TodoDeploy.Arguments.Target = "prod" from argv:<target>
-TodoDeploy.Flags.ExplainInputs = "true" from argv:--explain-inputs
-TodoDeploy.Flags.Port = "9000" from env:TODO_PORT; overrides config:user#deploy.port "8000", default "8080"
-TodoDeploy.Flags.Token = [redacted] from argv:--token
+<target> = "prod" from the command line
+--explain-inputs = "true" from the command line
+--port = "9000" from TODO_PORT (overrides "8000" from deploy.port in todo.yaml, "8080" from default)
+--token = [redacted] from the command line
 -- token.txt --
 s3cret
 -- todo.yaml --
@@ -52,24 +52,24 @@ import (
 )
 
 type todoDeployHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 -- deploy.go.txt --
-func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
 	if in.TodoDeploy.Flags.ExplainInputs {
-		_ = report.Format(rtx.Stdout)
-		return
+		_ = report.Explain(rtx.Stdout)
+		return nil
 	}
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	// …
+	return nil
 }
 -- cmd/todo/.rotini.spec.yaml --
 version: 0.0.0
@@ -109,3 +109,4 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error

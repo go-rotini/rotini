@@ -100,7 +100,7 @@ func TestChdir_pathRules(t *testing.T) {
 			}
 		}}
 		var errb bytes.Buffer
-		meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
+		meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
 		code, _ := NewProgramFunc(def, fnLookup(fns)).WithInputSettings(meta).
 			WithEnviron(env).WithDir(base).WithoutSignalHandling().
 			WithStdout(&bytes.Buffer{}).WithStderr(&errb).Run(argv)
@@ -131,7 +131,7 @@ func TestParser_expands(t *testing.T) {
 	env := []string{"HOME=" + home, "USERPROFILE=" + home, "A=a1", "OUTDIR=" + work}
 	rtx := NewContextFor(exDef, []string{"-f", "~/f.txt", "--paths", "$A", "--raw", "~/r", "~/src"}).WithDir(work).WithEnviron(env)
 	var in exInputs
-	if err := rtx.Parser().Parse(rtx, &in); err != nil {
+	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatal(err)
 	}
 	if f := in.App.Flags; f.File != home+"/f.txt" || len(f.Paths) != 1 || f.Paths[0] != "a1" || f.Raw != "~/r" || f.Out != work+"/out.txt" {
@@ -141,7 +141,7 @@ func TestParser_expands(t *testing.T) {
 		t.Errorf("src = %q", in.App.Arguments.Src)
 	}
 	rtx = NewContextFor(exDef, []string{"-f", "~/nope"}).WithDir(work).WithEnviron(env)
-	err := rtx.Parser().Parse(rtx, &in)
+	err := NewParser().Parse(rtx, &in)
 	if want := `app: -f: no such file: ` + quotePath(home+"/nope") + ` (written as "~/nope")`; err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}

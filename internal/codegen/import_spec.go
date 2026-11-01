@@ -291,9 +291,9 @@ func (sb *importSpecBuilder) findUnparsedExamples(specYAML []byte) bool {
 	check := newExampleChecker(spec)
 	sb.unparsed = map[string]string{}
 	walkCommandsAt(spec, func(c *Command, _, _ string) {
-		for _, line := range c.Examples {
-			if msg, _ := check.complaint(line); msg != "" {
-				sb.unparsed[line] = msg
+		for _, ex := range examplesOf(c.Examples) {
+			if msg, _ := check.complaint(ex.Run); msg != "" {
+				sb.unparsed[ex.Run] = msg
 			}
 		}
 	})

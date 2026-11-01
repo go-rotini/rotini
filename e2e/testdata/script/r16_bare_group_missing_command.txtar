@@ -1,0 +1,13 @@
+# R16 — a freshly initialized CLI run without a command prints its help on stderr and fails
+# with a typed missing-command error the reporter prints, so a script sees why it exited 1.
+
+gomodinit example.com/mycli
+exec rotini init mycli
+exec go mod tidy
+grep -count=1 'return rotini.MissingCommandError\(rtx\)' internal/cmd/mycli/mycli.go
+exec go build -o mycli$exe ./cmd/mycli
+
+wantexit 1 ./mycli$exe
+! stdout .
+stderr 'Usage:'
+stderr '^Error: mycli: a command is required \(one of: help, version\)$'

@@ -147,13 +147,13 @@ func TestProgram_withDependencyRegistersNil(t *testing.T) {
 	dep := NewDependency[*int]("claims.nil")
 	var val *int
 	found := false
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { val, found = rtx.GetDependency(dep) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { val, found = rtx.LookupDependency(dep) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if _, err := p.WithDependency(dep, nil).Run(p.args); err != nil {
 		t.Fatal(err)
 	}
 	if !found || val != nil {
-		t.Errorf("GetDependency = %v, %v; want a registered nil", val, found)
+		t.Errorf("LookupDependency = %v, %v; want a registered nil", val, found)
 	}
 }
 

@@ -107,6 +107,38 @@ func TestLintFlagsFirstIsOptIn(t *testing.T) {
 	}
 }
 
+// TestLintExitStatusOneIsOptIn pins that the exit-1 warning needs validate.exit_status_one,
+// and that a list adding the root's with `inherit: true` is checked with the root's codes.
+func TestLintExitStatusOneIsOptIn(t *testing.T) {
+	spec := &Spec{Command: Command{Name: "demo", ExitStatus: []ExitStatusEntry{{Code: 1}}, Commands: []Command{
+		{Name: "get", ExitStatus: []ExitStatusEntry{{Inherit: true}, {Code: 3}}},
+		{Name: "put", ExitStatus: []ExitStatusEntry{{Code: 3}}},
+	}}}
+	if got := lintExitStatusOne(spec, &Conf{}); got != nil {
+		t.Errorf("without validate.exit_status_one: %v, want nothing", got)
+	}
+	got := lintExitStatusOne(spec, &Conf{Validate: &ValidateConfig{ExitStatusOne: true}})
+	if len(got) != 1 || !strings.Contains(got[0].Error(), "demo/put") {
+		t.Errorf("with validate.exit_status_one: %v, want one warning, for demo/put", got)
+	}
+}
+
+// TestLintExitStatusDropsRootIsOptIn pins that the dropped-root-code warning needs
+// validate.exit_status_drops_root, and that a list with `inherit: true` is never reported.
+func TestLintExitStatusDropsRootIsOptIn(t *testing.T) {
+	spec := &Spec{Command: Command{Name: "demo", ExitStatus: []ExitStatusEntry{{Code: 1}, {Code: 3}}, Commands: []Command{
+		{Name: "get", ExitStatus: []ExitStatusEntry{{Inherit: true}, {Code: 4}}},
+		{Name: "put", ExitStatus: []ExitStatusEntry{{Code: 1}}},
+	}}}
+	if got := lintExitStatusDropsRoot(spec, &Conf{}); got != nil {
+		t.Errorf("without validate.exit_status_drops_root: %v, want nothing", got)
+	}
+	got := lintExitStatusDropsRoot(spec, &Conf{Validate: &ValidateConfig{ExitStatusDropsRoot: true}})
+	if len(got) != 1 || !strings.Contains(got[0].Error(), "demo/put") || !strings.Contains(got[0].Error(), "leaves out code 3,") {
+		t.Errorf("with validate.exit_status_drops_root: %v, want one warning, for demo/put dropping 3", got)
+	}
+}
+
 // TestZeroMaxBoundsAreKept pins that maxLength: 0 and maxItems: 0 are emitted rather than
 // dropped as unset. (The lintBoundsSatisfiable fixture pins that they survive decoding.)
 func TestZeroMaxBoundsAreKept(t *testing.T) {

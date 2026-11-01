@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 )
 
 // lintAcross runs the rules that need both documents: problems that arise from how the conf
@@ -38,6 +37,11 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintUnshownMessages,
 	lintFlagsFirst,
 	lintPosixNames,
+	lintExitStatusOne,
+	lintExitStatusDropsRoot,
+	lintInputSummaries,
+	lintHelpWidth,
+	lintSeeAlso,
 	lintToolStdinClash,
 	lintToolNames,
 	lintPackagePaths,
@@ -46,6 +50,7 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintHandlerFileTargets,
 	lintMainDir,
 	lintSkillDescription,
+	lintGenerators,
 }
 
 // lintManPageNames rejects two commands whose man pages would share a name when the man
@@ -172,7 +177,11 @@ func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 
 // posixUtilityName matches a POSIX utility name (XBD 12.2, guidelines 1 and 2): 2 to 9
 // lowercase letters and digits.
-var posixUtilityName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]{2,9}$`) })
+func posixUtilityName() *regexp.Regexp {
+	return posixUtilityNameOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]{2,9}$`) })
+}
+
+var posixUtilityNameOnce lazy[*regexp.Regexp]
 
 // lintPosixNames, turned on by the conf's `validate.posix_names`, warns when the root
 // command's name, which is the program's name, isn't a POSIX utility name. Sub-command names

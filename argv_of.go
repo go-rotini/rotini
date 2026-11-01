@@ -21,22 +21,25 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// ArgvError is a value [ArgvOf] can't write as a command line: a secret, a config or stdin
+// ArgvOfError is a value [ArgvOf] can't write as a command line: a secret, a config or stdin
 // input, or a value no argv spelling reads back, such as an explicit empty list on a flag
 // without a separator. Field names the input. It is a [CategoryInternal] error: the program
 // asked for a command line its inputs can't have.
-type ArgvError struct {
+type ArgvOfError struct {
 	Field  FieldPath
 	Reason string
 }
 
+// Deprecated: use [ArgvOfError].
+type ArgvError = ArgvOfError
+
 // Error returns "rotini: <field>: <reason>".
-func (e *ArgvError) Error() string {
+func (e *ArgvOfError) Error() string {
 	return fmt.Sprintf("rotini: %s: %s", e.Field, e.Reason)
 }
 
 // Unwrap returns [ErrInternal], so errors.Is(err, ErrInternal) holds.
-func (e *ArgvError) Unwrap() error { return ErrInternal }
+func (e *ArgvOfError) Unwrap() error { return ErrInternal }
 
 // ArgvOption configures [ArgvOf].
 type ArgvOption func(*argvConfig)
@@ -49,7 +52,7 @@ type argvConfig struct {
 }
 
 // ArgvSecrets lets [ArgvOf] write secret flags and arguments into argv. Without it they are an
-// [*ArgvError], since a command line is visible to other users of the machine (ps). Secret env
+// [*ArgvOfError], since a command line is visible to other users of the machine (ps). Secret env
 // inputs are always written, into env.
 func ArgvSecrets() ArgvOption {
 	return func(c *argvConfig) { c.secrets = true }
@@ -62,9 +65,9 @@ func ArgvPath(names ...string) ArgvOption {
 	return func(c *argvConfig) { c.path, c.hasPath = names, true }
 }
 
-// ArgvOf turns a typed inputs value back into the command line that supplies it: argv (without
-// the program name, as [Program.Run] takes it) and env, the KEY=value variables for its env
-// inputs, ready for [Program.WithEnviron]. It is the inverse of parsing, for tests and for
+// ArgvOf turns a typed inputs value back into the argv and environment that supply it: argv
+// (without the program name, as [Program.Run] takes it) and env, the KEY=value variables for
+// its env inputs, ready for [Program.WithEnviron]. It is the inverse of parsing, for tests and for
 // tools that drive a CLI:
 //
 //	in := cmd.TaskrAddInputs{}
@@ -90,7 +93,7 @@ func ArgvPath(names ...string) ArgvOption {
 // where rotini expands a glob argument's words itself, each `*`, `?` and `[` in one is written
 // as `[*]`, `[?]` and `[[]`, which read back as the literal character.
 //
-// A value no command line can supply is an [*ArgvError], never silently dropped:
+// A value no command line can supply is an [*ArgvOfError], never silently dropped:
 //   - a secret flag or argument, unless [ArgvSecrets] is passed;
 //   - a secret flag or argument that refuses a literal value (its from: leaves out value), even
 //     with [ArgvSecrets]: pass it through a file or stdin;
@@ -106,7 +109,7 @@ func ArgvPath(names ...string) ArgvOption {
 // command it names. Every error is a [CategoryInternal] one.
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error) {
 	argv, env, err = argvOf(runtime.GOOS, def, v, set, opts...)
-	var ae *ArgvError
+	var ae *ArgvOfError
 	if err != nil && !errors.As(err, &ae) {
 		err = InternalError(err)
 	}
@@ -250,7 +253,7 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 			return
 		}
 		if fd.Local && !leaf {
-			err = &ArgvError{Field: p, Reason: fmt.Sprintf("the flag applies only when %q is the command run, and it is an ancestor", frame.Name)}
+			err = &ArgvOfError{Field: p, Reason: fmt.Sprintf("the flag applies only when %q is the command run, and it is an ancestor", frame.Name)}
 			return
 		}
 		err = w.flag(p, fd, f)
@@ -271,14 +274,14 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 	eachTaggedField(ci, "Config", func(fieldName, _ string, _ reflect.StructTag, _ reflect.Value) {
 		p := fieldPath(top, "Config", fieldName)
 		if err == nil && w.given(p) {
-			err = &ArgvError{Field: p, Reason: "a config input comes only from a configuration file; write one"}
+			err = &ArgvOfError{Field: p, Reason: "a config input comes only from a configuration file; write one"}
 		}
 	})
 	if err != nil {
 		return err
 	}
 	if p := fieldPath(top, "Stdin"); w.given(p) {
-		return &ArgvError{Field: p, Reason: "the stdin payload isn't part of the command line; supply it on the program's stdin"}
+		return &ArgvOfError{Field: p, Reason: "the stdin payload isn't part of the command line; supply it on the program's stdin"}
 	}
 	return w.arguments(top, ci, frame, leaf)
 }
@@ -302,15 +305,15 @@ func argvIdentifier(fd FlagDef) string {
 // flag writes one set flag.
 func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 	if literalFree(fd.Secret, fd.From) {
-		return &ArgvError{Field: p, Reason: secretTakesNoLiteral}
+		return &ArgvOfError{Field: p, Reason: secretTakesNoLiteral}
 	}
 	if fd.Secret && !w.cfg.secrets {
-		return &ArgvError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
+		return &ArgvOfError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
 	}
 	id := argvIdentifier(fd)
 	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
-			return &ArgvError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
+			return &ArgvOfError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
 		}
 		f = f.Elem()
 	}
@@ -320,7 +323,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 	case fd.DottedKeys:
 		pairs, err := dottedPairs(f)
 		if err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 		return w.occurrences(p, fd, id, pairs)
 	case isObjectFlag(&fd):
@@ -331,7 +334,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 	case f.Kind() == reflect.Map:
 		pairs, err := mapPairs(f, fd.Layout)
 		if err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 		return w.occurrences(p, fd, id, pairs)
 	case f.Kind() == reflect.Slice && !isScalarSlice(f.Type()):
@@ -339,7 +342,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 		for i := range items {
 			s, err := argvText(f.Index(i), fd.Layout)
 			if err != nil {
-				return &ArgvError{Field: p, Reason: err.Error()}
+				return &ArgvOfError{Field: p, Reason: err.Error()}
 			}
 			items[i] = s
 		}
@@ -347,7 +350,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 	}
 	s, err := argvText(f, fd.Layout)
 	if err != nil {
-		return &ArgvError{Field: p, Reason: err.Error()}
+		return &ArgvOfError{Field: p, Reason: err.Error()}
 	}
 	return w.occurrence(p, fd, id, s)
 }
@@ -357,9 +360,9 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 func (w *argvWriter) countFlag(p FieldPath, fd FlagDef, id string, n int64) error {
 	switch {
 	case n < 0:
-		return &ArgvError{Field: p, Reason: "a count can't be negative"}
+		return &ArgvOfError{Field: p, Reason: "a count can't be negative"}
 	case n == 0 && len(flagDefaults(fd)) > 0:
-		return &ArgvError{Field: p, Reason: "an explicit count of 0 can't be written over a default"}
+		return &ArgvOfError{Field: p, Reason: "an explicit count of 0 can't be written over a default"}
 	}
 	for range n {
 		w.argv = append(w.argv, id)
@@ -389,7 +392,7 @@ func (w *argvWriter) boolFlag(fd FlagDef, id string, v bool) {
 func (w *argvWriter) occurrences(p FieldPath, fd FlagDef, id string, items []string) error {
 	if len(items) == 0 {
 		if fd.Separator == "" {
-			return &ArgvError{Field: p, Reason: "an explicit empty list can't be written on a flag without a separator"}
+			return &ArgvOfError{Field: p, Reason: "an explicit empty list can't be written on a flag without a separator"}
 		}
 		w.argv = append(w.argv, id+"=")
 		return nil
@@ -398,7 +401,7 @@ func (w *argvWriter) occurrences(p FieldPath, fd FlagDef, id string, items []str
 		if fd.Separator != "" {
 			q, err := csvItem(item, fd.Separator)
 			if err != nil {
-				return &ArgvError{Field: p, Reason: err.Error()}
+				return &ArgvOfError{Field: p, Reason: err.Error()}
 			}
 			item = q
 		}
@@ -416,7 +419,7 @@ func (w *argvWriter) occurrence(p FieldPath, fd FlagDef, id, value string) error
 		value = "@" + value
 	}
 	if value == "-" && slices.Contains(fd.From, "stdin") {
-		return &ArgvError{Field: p, Reason: `"-" on this flag reads stdin, and has no other spelling`}
+		return &ArgvOfError{Field: p, Reason: `"-" on this flag reads stdin, and has no other spelling`}
 	}
 	w.argv = append(w.argv, id+"="+value)
 	return nil
@@ -434,16 +437,16 @@ func (w *argvWriter) objectFlag(p FieldPath, fd FlagDef, id string, f reflect.Va
 	items := make([]string, 0, len(values))
 	for _, v := range values {
 		if v.Kind() == reflect.Pointer && v.IsNil() {
-			return &ArgvError{Field: p, Reason: "a nil object can't be written"}
+			return &ArgvOfError{Field: p, Reason: "a nil object can't be written"}
 		}
 		b, err := json.Marshal(v.Interface())
 		if err != nil {
-			return &ArgvError{Field: p, Reason: "can't write the object as JSON: " + err.Error()}
+			return &ArgvOfError{Field: p, Reason: "can't write the object as JSON: " + err.Error()}
 		}
 		// JSON replaces invalid UTF-8, so check the text reads back to the same value.
 		back := reflect.New(v.Type())
 		if err := json.Unmarshal(b, back.Interface()); err != nil || !reflect.DeepEqual(back.Elem().Interface(), v.Interface()) {
-			return &ArgvError{Field: p, Reason: "the object doesn't read back from JSON as it is (invalid UTF-8?)"}
+			return &ArgvOfError{Field: p, Reason: "the object doesn't read back from JSON as it is (invalid UTF-8?)"}
 		}
 		items = append(items, string(b))
 	}
@@ -469,20 +472,20 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 		}
 		given[j] = true
 		if !leaf {
-			return &ArgvError{Field: p, Reason: fmt.Sprintf("only the invoked command takes arguments; %q is an ancestor", frame.Name)}
+			return &ArgvOfError{Field: p, Reason: fmt.Sprintf("only the invoked command takes arguments; %q is an ancestor", frame.Name)}
 		}
 		if literalFree(defs[j].Secret, defs[j].From) {
-			return &ArgvError{Field: p, Reason: secretTakesNoLiteral}
+			return &ArgvOfError{Field: p, Reason: secretTakesNoLiteral}
 		}
 		if defs[j].Secret && !w.cfg.secrets {
-			return &ArgvError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
+			return &ArgvOfError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
 		}
 		vals, err := argWords(s.Field(j), defs, j, frame)
 		if err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 		if len(vals) == 0 {
-			return &ArgvError{Field: p, Reason: "an explicit empty list of arguments can't be written"}
+			return &ArgvOfError{Field: p, Reason: "an explicit empty list of arguments can't be written"}
 		}
 		if defs[j].Glob && w.cfg.goos == "windows" {
 			for i, s := range vals {
@@ -506,7 +509,7 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 					break
 				}
 			}
-			return &ArgvError{Field: p, Reason: "an argument can't be written while one before it is unset"}
+			return &ArgvOfError{Field: p, Reason: "an argument can't be written while one before it is unset"}
 		}
 	}
 	if !frame.Passthrough {
@@ -585,12 +588,12 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 	}
 	names := tag.Get("env")
 	if names == "" {
-		return &ArgvError{Field: p, Reason: "the input's struct tag names no environment variable"}
+		return &ArgvOfError{Field: p, Reason: "the input's struct tag names no environment variable"}
 	}
 	name, _, _ := strings.Cut(names, ",")
 	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
-			return &ArgvError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
+			return &ArgvOfError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
 		}
 		f = f.Elem()
 	}
@@ -604,28 +607,28 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 	case f.Kind() == reflect.Map:
 		pairs, err := mapPairs(f, layout)
 		if err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 		if text, err = envList(pairs, sep); err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 	case f.Kind() == reflect.Slice && !isScalarSlice(f.Type()):
 		items := make([]string, f.Len())
 		for i := range items {
 			s, err := argvText(f.Index(i), layout)
 			if err != nil {
-				return &ArgvError{Field: p, Reason: err.Error()}
+				return &ArgvOfError{Field: p, Reason: err.Error()}
 			}
 			items[i] = s
 		}
 		var err error
 		if text, err = envList(items, sep); err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 	default:
 		var err error
 		if text, err = argvText(f, layout); err != nil {
-			return &ArgvError{Field: p, Reason: err.Error()}
+			return &ArgvOfError{Field: p, Reason: err.Error()}
 		}
 	}
 	w.env = append(w.env, name+"="+text)
@@ -651,7 +654,7 @@ func (w *argvWriter) envNested(p FieldPath, nest string, f reflect.Value) error 
 	sep, _, _ := strings.Cut(rest, ",")
 	m, ok := reflect.TypeAssert[map[string]any](f)
 	if !ok || sep == "" {
-		return &ArgvError{Field: p, Reason: "a nested env input must be a map[string]any with a separator"}
+		return &ArgvOfError{Field: p, Reason: "a nested env input must be a map[string]any with a separator"}
 	}
 	var out []string
 	var walk func(prefix string, m map[string]any) error
@@ -659,6 +662,11 @@ func (w *argvWriter) envNested(p FieldPath, nest string, f reflect.Value) error 
 		for k, v := range m {
 			if k == "" || k != strings.ToLower(k) || strings.Contains(k, strings.ToLower(sep)) || strings.Contains(k, ".") {
 				return fmt.Errorf("the key %q can't be written: keys must be lowercase and hold neither %q nor \".\"", k, sep)
+			}
+			// The variable's name is upper case and reads back lower-cased, so a key whose case
+			// doesn't round-trip (final sigma "ς" reads back as "σ") would come back as another key.
+			if strings.ToLower(strings.ToUpper(k)) != k {
+				return fmt.Errorf("the key %q can't be written: it doesn't read back the same from an upper-case variable name", k)
 			}
 			name := prefix + sep + strings.ToUpper(k)
 			switch v := v.(type) {
@@ -675,7 +683,7 @@ func (w *argvWriter) envNested(p FieldPath, nest string, f reflect.Value) error 
 		return nil
 	}
 	if err := walk(base, m); err != nil {
-		return &ArgvError{Field: p, Reason: err.Error()}
+		return &ArgvOfError{Field: p, Reason: err.Error()}
 	}
 	slices.Sort(out)
 	w.env = append(w.env, out...)

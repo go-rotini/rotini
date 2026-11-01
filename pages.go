@@ -83,10 +83,10 @@ func skipBytes(text string, j int, lo, hi byte) int {
 	return j
 }
 
-// Page is one generated documentation page for one command: a man page or a markdown reference
-// page. With the man feature on, codegen emits a ManPages function returning every command's man
-// page; with the markdown feature on, MarkdownPages. Both list the visible commands in tree
-// order, root first.
+// Page is one generated documentation page, a man page or a markdown reference page, for one
+// command or one help topic. With the man feature on, codegen emits a ManPages function
+// returning every man page; with the markdown feature on, MarkdownPages. Both list the visible
+// commands in tree order, root first, then the topics.
 //
 //	for _, p := range cmd.ManPages() {
 //		path := filepath.Join(dir, p.Name+"."+cmd.ManSection)

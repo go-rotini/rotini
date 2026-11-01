@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"math"
-	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -58,9 +57,9 @@ type parsedInputs struct {
 	// "ame", so an error that follows from that says so. nil when none.
 	spelled *spelling
 
-	// dir is the run's injected working directory, which relative existingfile and existingdir
-	// values are checked against; "" is the process's.
-	dir string
+	// view is the run's view: its injected working directory, which relative existingfile and
+	// existingdir values are checked against ("" is the process's), and its file system.
+	view *osView
 
 	// clock is what relative time values are measured from; nil reads time.Now.
 	clock *runClock
@@ -89,17 +88,27 @@ func (p *parsedInputs) one(s string) []string {
 }
 
 // argvAcq is what reading argv values may consult: stdin for a `from: [stdin]` flag's "-",
-// and the run's injected directory for a relative `@file` ("" is the process working
+// and the run's injected directory and file system for a relative `@file` ("" is the process working
 // directory).
 type argvAcq struct {
 	stdin io.Reader
 	// rtx, when stdin is nil, supplies the run's stdin replay on the first "-" value, so a parse
 	// with none builds no reader.
 	rtx   *Context
-	dir   string
+	view  *osView   // the run's directory and file system; nil is the process's
 	clock *runClock // what relative time values are measured from; nil reads time.Now
 	// goos is the operating system whose rules glob arguments follow; "" is the running one.
 	goos string
+	// capture, when set, collects each flag occurrence and positional as read, before any
+	// acquisition: [Parser.ParseArgv]'s result.
+	capture *ArgvValues
+}
+
+// captureArg collects a positional word for [Parser.ParseArgv], when capturing.
+func (a argvAcq) captureArg(word string) {
+	if a.capture != nil {
+		a.capture.Args = append(a.capture.Args, word)
+	}
 }
 
 // detachedHint is the hint an unexpected-positional error carries when one of the extra
@@ -301,6 +310,7 @@ const (
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
 	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
 	ParseKindMisplacedFlag                 // a flag was typed where it can't apply: before a plugin's name, or a local flag while running a command below its own
+	ParseKindMissingCommand                // a command that only groups others was run without one of them (see [MissingCommandError])
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -328,6 +338,8 @@ func (k ParseKind) String() string {
 		return "internal"
 	case ParseKindMisplacedFlag:
 		return "misplaced-flag"
+	case ParseKindMissingCommand:
+		return "missing-command"
 	default:
 		return "unspecified"
 	}
@@ -335,7 +347,7 @@ func (k ParseKind) String() string {
 
 // ParseError is a parse-time failure caused by bad input. Its message carries no suggestions
 // or usage text; the structured fields let a handler compose its own response: switch on Kind,
-// pass Token and Candidates to a [Suggestor], or render help for Command. It unwraps to
+// pass Token and Candidates to a [Suggester], or render help for Command. It unwraps to
 // [ErrUsage] ([ErrInternal] for [ParseKindInternal]), so [CategoryOf] can classify it. The
 // default reporter exits 1; a program wanting exit code 2 for usage errors maps it in its own
 // reporter (see [Category]).
@@ -344,7 +356,7 @@ func (k ParseKind) String() string {
 //	if errors.As(err, &pe) {
 //	    switch pe.Kind {
 //	    case rotini.ParseKindUnknownFlag, rotini.ParseKindUnknownCommand:
-//	        // pe.Token + pe.Candidates feed a Suggestor's "did you mean"
+//	        // pe.Token + pe.Candidates feed a Suggester's "did you mean"
 //	    case rotini.ParseKindMissingRequired:
 //	        // prompt, or point at the help for pe.Command
 //	    }
@@ -369,6 +381,10 @@ func (e *ParseError) Error() string {
 	return e.path + ": " + e.Msg
 }
 
+// Path returns the path of the command the error is reported against, as Error prints it
+// first ("taskr add"), or "" when Error prints none.
+func (e *ParseError) Path() string { return e.path }
+
 // atCommand reports each [*ParseError] and usage [*InputError] in err's tree against chain's
 // command path, unless it already names one. An internal error is the program's mistake, not
 // the user's input, so it is left as it is.
@@ -387,6 +403,9 @@ func atPath(err error, path string) {
 			e.path = path
 		}
 	case *InputError:
+		if e.Command == "" {
+			e.Command = path[strings.LastIndexByte(path, ' ')+1:]
+		}
 		if e.path == "" && e.usage {
 			e.path = path // Error never prints Cause, so the cause needs no path of its own
 		}
@@ -412,12 +431,12 @@ func (e *ParseError) Unwrap() error {
 // resolved chain declares (GNU/POSIX grammar, typed coercion, enum and constraint checks),
 // failing with a [*ParseError].
 //
-// Parsing is opt-in: a CLI that wants raw argv reads [Context.Argv] instead. A handler reads
-// the parser with [Context.Parser]:
+// It is the [ArgvParser] every inputs method reads the command line with unless the program sets
+// its own with [Program.WithParser]. Parsing is opt-in: a CLI that wants raw argv reads
+// [Context.Argv] instead. [Parser.Parse] binds the command line alone:
 //
-//	parser := rtx.Parser()
 //	var in MycliInputs
-//	err := parser.Parse(rtx, &in)
+//	err := rotini.NewParser().Parse(rtx, &in)
 type Parser struct{}
 
 // NewParser returns rotini's default [Parser].
@@ -455,8 +474,8 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 
 // parseBind parses argv into a store, expands the values of inputs that declare `expand`, and
 // binds the store into out without validating — that is [validate]'s job. It returns the store
-// and chain for that deferred pass. The [InputReader] runs the same steps with its own view of
-// the environment in between (see [parseArgvStore]).
+// and chain for that deferred pass. The [InputReader] runs the same steps through the run's
+// parser, with its own view of the environment in between (see [readArgvStore]).
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, error) {
 	store, chain, err := parseArgvStore(p, rtx, out)
 	if err != nil {
@@ -538,7 +557,7 @@ func flagTokenWidth(chain []Command, argv []string, i int) int {
 //
 // A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
 // -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
-// the chain's vocabulary for a [Suggestor].
+// the chain's vocabulary for a [Suggester].
 func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag func(int, *FlagDef, string, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
@@ -588,6 +607,9 @@ func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag
 // user typed (for error labels), the value resolved through the flag's acquisition modes and
 // split on its separator, and the fact that argv set it.
 func (p *parsedInputs) recordArgvFlag(idx int, fd *FlagDef, value, typed string, acq argvAcq) error {
+	if acq.capture != nil {
+		acq.capture.Flags = append(acq.capture.Flags, ArgvFlag{Name: fd.Name, Value: value, Typed: typed})
+	}
 	si := &p.scopes[idx]
 	if si.typed == nil {
 		si.typed = map[string]string{}
@@ -642,6 +664,7 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd *FlagDef, value, typed string,
 // argument it lands in, if that declares one. A variadic followed by fixed arguments splits
 // nothing, since where it ends is known only once every word is in.
 func (p *parsedInputs) recordArg(leaf Command, idx int, value string, acq argvAcq) error {
+	acq.captureArg(value)
 	if ad, ok := acquiringArg(leaf.Arguments, len(p.scopes[idx].args)); ok {
 		if err := refuseSecretLiteral(ad.Secret, ad.From, "<"+ad.Name+">", "", value); err != nil {
 			return err
@@ -686,10 +709,10 @@ func acquiringArg(args []ArgDef, pos int) (ArgDef, bool) {
 // parseArgvTokens is parseInto without defaults: exactly what argv supplied. It records each
 // explicitly set flag in the store's argvSet, the single source of truth for "set on the
 // command line". acq.stdin backs the from:stdin sentinel and is read only when a "-" value
-// appears on an opted-in flag; acq.dir is where relative `@file` and existingfile paths resolve.
+// appears on an opted-in flag; acq.view is where relative `@file` and existingfile paths resolve.
 func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs, error) {
 	store := newParsedInputs(len(chain))
-	store.dir, store.clock = acq.dir, acq.clock
+	store.view, store.clock = acq.view, acq.clock
 	store.poolHint = len(argv)
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
@@ -722,6 +745,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 
 		if raw || passthrough() {
 			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
+			acq.captureArg(tok)
 			continue
 		}
 
@@ -760,6 +784,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		if depth == len(chain) && leafWords == pt {
 			raw = true // the passthrough argument's first word
 			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
+			acq.captureArg(tok)
 			continue
 		}
 		if optionsDone && store.lateFlag == nil && isFlag(chain[:depth], tok) {
@@ -893,7 +918,7 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 			if len(vals) == 0 {
 				continue
 			}
-			if on, err := strconv.ParseBool(vals[len(vals)-1]); err == nil && on {
+			if boolSetTrue(vals[len(vals)-1]) {
 				return true
 			}
 		}
@@ -1003,7 +1028,7 @@ func winningValues(fd *FlagDef, vals []string) []string {
 
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
-func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock *runClock) error {
+func checkFlagValues(fd *FlagDef, label string, vals []string, view *osView, clock *runClock) error {
 	enum := flagEnum(fd)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -1016,7 +1041,7 @@ func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock
 		}
 	}
 	fs := clock.features()
-	if err := checkConstraints(fs, label, fd.Type, fd.Base, fd.Constraints, vals, fd.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, fd.Type, fd.Base, fd.Constraints, vals, fd.Secret, view); err != nil {
 		return err
 	}
 	if fd.UniqueItems && !isObjectFlag(fd) {
@@ -1044,7 +1069,7 @@ func missingBounds(label string) *WiringError {
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
-// mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor]. A command's
+// mistyped sub-command. The error carries the sibling vocabulary for a [Suggester]. A command's
 // own name typed after "--" is not mistyped: "--" ended command lookup, which the message says,
 // and the name is left out of the vocabulary.
 func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
@@ -1072,6 +1097,85 @@ func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
 		Command:    leaf.Name,
 		Token:      tok,
 		Candidates: childCommandNames(leaf),
+	}
+}
+
+// UnknownCommandError is the error for a command path that names no command of def: path is
+// the command words below the root, as a generated Help, Man, Markdown or Usage function takes
+// them. It is the [ParseKindUnknownCommand] error the command line gives for the same word,
+// reported against the deepest command path reaches, with that command's sub-commands and
+// plugins (and, at the root, its help topics) as Candidates. Every generated resolver returns
+// it for a path it has no page for:
+//
+//	_, err := Help("deplyo") // mycli: unknown command "deplyo"
+//
+// When every word of path names a command, the last one is reported.
+func UnknownCommandError(def Definition, path ...string) *ParseError {
+	chain := []Command{{Name: def.Name, Commands: def.Commands, Plugins: def.Plugins, Passthrough: def.Passthrough}}
+	i := 0
+	for ; i < len(path); i++ {
+		cur := &chain[len(chain)-1]
+		if cur.Passthrough {
+			break
+		}
+		c, ok := findChild(cur, path[i])
+		if !ok {
+			break
+		}
+		chain = append(chain, Command{Name: c.Name, Commands: c.Commands, Plugins: c.Plugins, Passthrough: c.Passthrough})
+	}
+	if i == len(path) && i > 0 {
+		chain, i = chain[:len(chain)-1], i-1
+	}
+	var tok string
+	if i < len(path) {
+		tok = path[i]
+	}
+	leaf := &chain[len(chain)-1]
+	candidates := childCommandNames(leaf)
+	if len(chain) == 1 {
+		for _, t := range def.Topics {
+			candidates = append(candidates, t.Name)
+		}
+	}
+	return &ParseError{
+		Kind:       ParseKindUnknownCommand,
+		Msg:        "unknown command " + strconv.Quote(tok),
+		Command:    leaf.Name,
+		Token:      tok,
+		Candidates: candidates,
+		path:       pathOf(chain),
+	}
+}
+
+// MissingCommandError is the error for running a command that groups others without naming one of
+// them: a [ParseKindMissingCommand] error reported against the running command's path, with its
+// visible sub-commands and declared plugins (and their aliases) as Candidates. A seeded group
+// stub prints the command's help and returns it:
+//
+//	fmt.Fprintln(rtx.Stderr, rtx.Help())
+//	return rotini.MissingCommandError(rtx) // cfgctl config: a command is required (one of: get, set, unset)
+func MissingCommandError(rtx *Context) *ParseError {
+	cmd := rtx.Command()
+	var names []string
+	for _, c := range cmd.Commands {
+		if !c.Hidden {
+			names = append(names, c.Name)
+		}
+	}
+	for _, r := range cmd.Plugins {
+		names = append(names, r.Name)
+	}
+	msg := "a command is required"
+	if len(names) > 0 {
+		msg += " (one of: " + strings.Join(names, ", ") + ")"
+	}
+	return &ParseError{
+		Kind:       ParseKindMissingCommand,
+		Msg:        msg,
+		Command:    cmd.Name,
+		Candidates: childCommandNames(&cmd),
+		path:       rtx.CommandPath(),
 	}
 }
 
@@ -1138,7 +1242,7 @@ func validate(chain []Command, store *parsedInputs) error {
 			if waived {
 				err = checkFlagShape(fd, fsi.label(fd), vals)
 			} else if err = checkRepeat(fd, fsi.label(fd), fsi.flags[fd.Name], store.setOnArgv(i, fd.Name)); err == nil {
-				err = checkFlagValues(fd, fsi.label(fd), vals, store.dir, store.clock)
+				err = checkFlagValues(fd, fsi.label(fd), vals, store.view, store.clock)
 			}
 			if err != nil {
 				return withSource(withWritten(scoped(err, f.Name, fsi.label(fd)), fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
@@ -1152,12 +1256,12 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(chain, si, store); err != nil {
 		return err
 	}
-	return validateArgs(leaf, si, waived, store.dir, store.clock)
+	return validateArgs(leaf, si, waived, store.view, store.clock)
 }
 
 // validateArgs checks the leaf's positional values: every rule normally, and only whether each
 // value can be read at all under a short circuit.
-func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock *runClock) error {
+func validateArgs(leaf *Command, si *scopeInputs, waived bool, view *osView, clock *runClock) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	spans := argSpans(leaf.Arguments, len(si.args))
 	for i := range leaf.Arguments {
@@ -1182,7 +1286,7 @@ func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock
 		if len(vals) == 0 && !ad.Variadic {
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		} // an absent variadic still gets a MinItems check
-		if err := checkArgValues(ad, vals, dir, clock); err != nil {
+		if err := checkArgValues(ad, vals, view, clock); err != nil {
 			return withSource(withWritten(scoped(err, leaf.Name, ""), vals, si.written), si.argOrigin[i])
 		}
 	}
@@ -1191,7 +1295,7 @@ func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock
 
 // checkArgValues checks one argument's values against its enum and its constraints; the
 // positional counterpart of [checkFlagValues].
-func checkArgValues(ad *ArgDef, vals []string, dir string, clock *runClock) error {
+func checkArgValues(ad *ArgDef, vals []string, view *osView, clock *runClock) error {
 	enum := argEnum(ad)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -1200,7 +1304,7 @@ func checkArgValues(ad *ArgDef, vals []string, dir string, clock *runClock) erro
 	}
 	label := "<" + ad.Name + ">"
 	fs := clock.features()
-	if err := checkConstraints(fs, label, ad.Type, ad.Base, ad.Constraints, vals, ad.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, ad.Type, ad.Base, ad.Constraints, vals, ad.Secret, view); err != nil {
 		return err
 	}
 	if ad.UniqueItems {
@@ -1226,7 +1330,7 @@ func hasVariadicArg(args []ArgDef) bool {
 // type, which a valid spec cannot produce, is skipped. base is an integer input's base rule,
 // which numeric bounds read values under. A secret input's value and length are redacted. A
 // check the run's features do not wire is a [*WiringError].
-func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, values []string, secret bool, dir string) error {
+func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, values []string, secret bool, view *osView) error {
 	if (isArrayType(typ) || isMapType(typ)) && (c.MinItems > 0 || c.MaxItems != nil) {
 		if fs.bounds == nil {
 			return missingBounds(label)
@@ -1254,7 +1358,7 @@ func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, va
 			}
 		}
 		if isPathType(elem) {
-			if err := checkPathKind(fs, label, elem, v, dir); err != nil {
+			if err := checkPathKind(fs, label, elem, v, view); err != nil {
 				return err
 			}
 		}
@@ -1276,14 +1380,14 @@ func checkPattern(fs *featureSet, label string, c Constraints, v string, secret 
 
 // checkPathKind enforces a path type on one value: existence for existingfile and existingdir,
 // the run's stream-path check for inputfile and outputfile.
-func checkPathKind(fs *featureSet, label, typ, value, dir string) error {
+func checkPathKind(fs *featureSet, label, typ, value string, view *osView) error {
 	if !isStreamPathType(typ) {
-		return checkExistingPath(label, typ, value, dir)
+		return checkExistingPath(label, typ, value, view)
 	}
 	if fs.streamPaths == nil {
 		return missingFeature("stream-paths", "StreamPaths()", "input "+label+" is an "+typ)
 	}
-	return fs.streamPaths.check(label, typ, value, dir)
+	return fs.streamPaths.check(label, typ, value, view)
 }
 
 // hasLengthBounds reports whether c declares a length bound.
@@ -1299,18 +1403,18 @@ func isPathType(typ string) bool {
 // checkPathExists enforces an existingfile/existingdir type at parse time, so the error names
 // the flag the user typed. It checks only existence and kind; cleaning, resolving symlinks and
 // creating missing files are left to the handler, and "~" and "$VAR" are expanded beforehand
-// only for inputs that declare `expand`. A relative value is checked against dir, the run's
-// injected directory ("" is the process working directory).
-func checkPathExists(label, typ, value, dir string) error {
+// only for inputs that declare `expand`. A relative value is checked against the run's
+// injected directory ("" is the process working directory), in the run's file system.
+func checkPathExists(label, typ, value string, view *osView) error {
 	if isStreamPathType(typ) {
-		return checkStreamPath(label, typ, value, dir)
+		return checkStreamPath(label, typ, value, view)
 	}
-	return checkExistingPath(label, typ, value, dir)
+	return checkExistingPath(label, typ, value, view)
 }
 
 // checkExistingPath is [checkPathExists] for existingfile and existingdir.
-func checkExistingPath(label, typ, value, dir string) error {
-	info, err := os.Stat(joinDir(dir, value))
+func checkExistingPath(label, typ, value string, view *osView) error {
+	info, err := view.stat(joinDir(view.base(), value))
 	switch {
 	case pathMissing(err):
 		noun := "file"
@@ -1605,7 +1709,17 @@ func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 		}
 	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
-			return constraintViolation("flags %s must be used together", strings.Join(all, ", "))
+			missing := all[:0:0]
+			for _, l := range all {
+				if !slices.Contains(set, l) {
+					missing = append(missing, l)
+				}
+			}
+			verb := "is"
+			if len(missing) > 1 {
+				verb = "are"
+			}
+			return constraintViolation("flags %s must be used together; %s %s missing", strings.Join(all, ", "), joinAnd(missing), verb)
 		}
 	case FlagGroupOneOf:
 		switch {
@@ -1859,7 +1973,7 @@ func plural(word string, n int) string {
 // trailing line ending removed (trimAcquiredPayload, as the stdin channel does) and is then
 // coerced and validated like a literal value. Without the matching mode, '@' and '-' are
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
-// A relative `@file` path resolves against acq.dir; the error names it as typed. A file larger
+// A relative `@file` path resolves against acq.view's directory; the error names it as typed. A file larger
 // than 64 MiB is an error rather than a value.
 func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
 	return resolveAcquired(fd.From, label, label, value, acq)
@@ -1878,12 +1992,12 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 			Flag: flag, Token: value,
 		}
 	case strings.HasPrefix(value, "@") && slices.Contains(from, "file"):
-		path := joinDir(acq.dir, value[1:])
-		data, err := readValueFile(path)
+		path := joinDir(acq.view.base(), value[1:])
+		data, err := readValueFile(acq.view, path)
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  label + ": " + unreadableFile(value[1:], path, err),
+				Msg:  label + ": " + unreadableFile(acq.view, value[1:], path, err),
 				Flag: flag, Token: value,
 			}
 		}
@@ -1916,7 +2030,7 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 // unreadableFile says why an `@file` value could not be read in rotini's words rather than the
 // platform-specific OS error text, as checkPathExists does. typed is the path as the user wrote
 // it, path where it resolved.
-func unreadableFile(typed, path string, err error) string {
+func unreadableFile(view *osView, typed, path string, err error) string {
 	switch {
 	case errors.Is(err, errValueFileTooLarge):
 		return fmt.Sprintf("%s is larger than 64 MiB", quotePath(typed))
@@ -1925,7 +2039,7 @@ func unreadableFile(typed, path string, err error) string {
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Sprintf("permission denied reading %s", quotePath(typed))
 	}
-	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+	if info, statErr := view.stat(path); statErr == nil && info.IsDir() {
 		return fmt.Sprintf("%s is a directory, not a file", quotePath(typed))
 	}
 	return fmt.Sprintf("cannot read %s", quotePath(typed))
@@ -1938,10 +2052,10 @@ const valueFileCap = 64 << 20
 var errValueFileTooLarge = errors.New("value file too large")
 
 // readValueFile reads an `@file` value's file, up to valueFileCap bytes.
-func readValueFile(path string) ([]byte, error) {
-	f, err := os.Open(path)
+func readValueFile(view *osView, path string) ([]byte, error) {
+	f, err := view.open(path)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // unreadableFile words it
+		return nil, err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, valueFileCap+1))
@@ -2622,7 +2736,7 @@ func coerce(f reflect.Value, raw []string, fs *featureSet) error {
 		last := raw[len(raw)-1]
 		v, err := parse(last)
 		if err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
+			return &coerceError{Value: last, TypeName: valueLabel(f.Type(), fs), Cause: err}
 		}
 		f.Set(v)
 		return nil
@@ -2643,14 +2757,14 @@ func coerce(f reflect.Value, raw []string, fs *featureSet) error {
 	if f.Type() == durationType {
 		d, err := parseDuration(last)
 		if err != nil {
-			return notValid(last, "duration")
+			return &coerceError{Value: last, TypeName: "duration", Cause: errDurationForm}
 		}
 		f.SetInt(int64(d))
 		return nil
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
 		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
+			return &coerceError{Value: last, TypeName: valueLabel(f.Type(), fs), Cause: err}
 		}
 		return nil
 	}
@@ -2774,6 +2888,9 @@ func coerceMessage(err error, secret bool) string {
 	return err.Error()
 }
 
+// errDurationForm says how a duration is written, for a value that isn't one.
+var errDurationForm = errors.New("write it as 90s, 5m, 1h30m or 7d")
+
 // notValid is the standard "value isn't a <type>" coercion error.
 func notValid(value, typeName string) error {
 	return &coerceError{Value: value, TypeName: typeName}
@@ -2827,7 +2944,7 @@ func coerceNumber(f reflect.Value, last string) error {
 }
 
 // outOfRange is the error for a number that parsed but does not fit its field's type, naming
-// the range: `"300" is not a valid int8 (out of range: -128 to 127)`.
+// the range: `"300" is not a valid integer (out of range: -128 to 127)`.
 func outOfRange(value string, t reflect.Type) error {
 	var bounds string
 	switch t.Kind() {
@@ -2839,7 +2956,7 @@ func outOfRange(value string, t reflect.Type) error {
 	default: // float32: a float64 field cannot overflow a value ParseFloat(…, 64) accepted
 		bounds = fmt.Sprintf("±%g", math.MaxFloat32)
 	}
-	return &coerceError{Value: value, TypeName: typeLabel(t, noFeatures), Cause: fmt.Errorf("out of range: %s", bounds)}
+	return &coerceError{Value: value, TypeName: numberLabel(t), Cause: fmt.Errorf("out of range: %s", bounds)}
 }
 
 // coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted

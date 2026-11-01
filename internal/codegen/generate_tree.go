@@ -174,6 +174,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		rootPluginPath:  root.PluginPath,
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Command.Schemas,
+		channels:        spec.Command.Channels,
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       envPrefix,
 		adoptedPrefixes: map[string]string{},
@@ -190,7 +191,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		stdinType:      stdinTypeExpr(gp.rootPascal, root.inputs()),
 		stdinFormat:    stdinFormatExpr(root.inputs()),
 		inputs:         []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
-		exitCodes:      exitCodesOf(root.ExitStatus),
+		exitStatus:     root.ExitStatus,
 		secret:         hasSecretInput(root.inputs()),
 	}
 	gp.embedFlagSets(&gp.root, &root)
@@ -212,6 +213,9 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 	}
 	gp.tree = tree
 	if err := composedTopicClash(root, tree); err != nil {
+		return nil, err
+	}
+	if err := gp.composedChannelClash(); err != nil {
 		return nil, err
 	}
 
@@ -273,6 +277,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 		}
 		var below map[string][]override
 		var replacedBy replacement
+		c.SeeAlso = gp.rebaseSeeAlso(c.SeeAlso, ctx.specRoot) // before the overrides, which name commands from their own spec
 		c, below, replacedBy = gp.applyOverrides(c, ctx)
 
 		path := gp.childPath(parentPath, c.Name)
@@ -301,7 +306,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				stdinType:       stdinTypeExpr(prefix, c.inputs()),
 				stdinFormat:     stdinFormatExpr(c.inputs()),
 				inputs:          inputsFields(gp.rootPascal, gp.pathSegments[path]),
-				exitCodes:       exitCodesOf(c.ExitStatus),
+				exitStatus:      c.ExitStatus,
 				hasChildren:     len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
 				secret:          hasSecretInput(c.inputs()),
 				completionShell: isCompletionCommand(&c),
@@ -540,6 +545,9 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	graftName := merged.Name
 	composeRootPath := gp.childPath(parentPath, graftName)
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
+	if c.SeeAlso == nil {
+		merged.SeeAlso = gp.rebaseSeeAlso(childRoot.SeeAlso, composeRootPath)
+	}
 
 	// Carry the child's config_files and env_prefix into the parent's InputSettings, so
 	// `parent child cmd` reads the same sources as `child cmd`.
@@ -550,7 +558,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		inputFields: gp.inputFieldsOf(childRoot.inputs()),
 	})
 
-	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas}
+	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas, channels: childRoot.Channels}
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope, specRoot: composeRootPath, flagSets: childRoot.FlagSets}
 	if !passthrough {
 		ctx.typeAlias, ctx.typeRoot, ctx.typePascal = alias, composeRootPath, delegateRoot
@@ -736,6 +744,9 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	// to the direct child. Its subtree resolves against the grandchild's directory.
 	synth := overlayCommand(gc, c)
 	synth.Ref = ""
+	if c.SeeAlso != nil { // the referring spec's, which names commands from its own root
+		synth.SeeAlso = gp.rebaseSeeAlso(c.SeeAlso, ctx.specRoot)
+	}
 	synth.Commands = gc.Commands // authored siblings merge below
 	overrides, additions, err := gp.splitBeside(c.Commands, gc.Commands, rr.childBase, moduleName)
 	if err != nil {
@@ -749,7 +760,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 		cmd: Command{Name: synth.Name, Commands: overrides}, specRoot: ctx.specRoot,
 	}}, above...)}
 	gcCtx.pluginHost = gc.Name
-	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
+	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas, channels: gc.Channels}
 	gcCtx.flagSets = gc.FlagSets
 	gcCtx.specRoot = gp.childPath(parentPath, synth.Name)
 	gcCtx.typeAlias = gp.nestedTypeAlias(rr, c, ctx, moduleName)
@@ -870,13 +881,14 @@ type fieldDef struct {
 	Field   string
 	GoType  string
 	Tag     string
-	Import  string // Go import path backing GoType ("" for builtins); aliased form "alias path"
-	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
-	EnvVar  string // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
-	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
-	EnvFile string // the variable naming a file to read the value from (schema.variable_file); "" otherwise
-	CfgFile string // config input's pinned source file (schema.file); the value is read from that file only
-	Comment string // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
+	Import  string   // Go import path backing GoType ("" for builtins); aliased form "alias path"
+	Recon   string   // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
+	EnvVar  string   // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
+	EnvNest string   // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
+	EnvFile string   // the variable naming a file to read the value from (schema.variable_file); "" otherwise
+	CfgFile string   // config input's pinned source file (schema.file); the value is read from that file only
+	Comment string   // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
+	Doc     []string // the field's doc comment lines, from the input's summary and deprecation; nil for none
 	// Constraint is the space-separated validation struct tags for an env/config field
 	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), enforced by the input reader on the
 	// reconciled value; "" when the input declares no constraints.
@@ -929,9 +941,10 @@ type genCommand struct {
 	stdinType      string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
 	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
 	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
-	exitCodes      []int      // the codes its spec's exit_status lists, for the handler audit
 	hasChildren    bool       // it declares sub-commands, plugins or plugin discovery
 	secret         bool       // one of its own inputs is secret, so its stub never prints inputs
+	// exitStatus is its spec's exit_status as written, for the handler audit.
+	exitStatus []ExitStatusEntry
 	// completionShell: a command named completion whose one argument is a required shell
 	// name, so a new stub prints that shell's completion script.
 	completionShell bool

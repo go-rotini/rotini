@@ -20,7 +20,7 @@ import (
 )
 
 // InputReader is the default multi-source input reader. It fills a command's typed inputs from
-// argv (via a default [Parser]) and from the non-argv channels — environment variables,
+// argv (via the run's [ArgvParser], see [Context.Parser]) and from the non-argv channels — environment variables,
 // configuration files, and the leaf command's typed stdin payload — reconciled and decoded by
 // recon. It is the engine behind [Context.Inputs]; [Context.ArgvInputs] and its siblings expose
 // the channels individually.
@@ -33,8 +33,7 @@ import (
 // two channels use independent registries, so an env var never leaks into a config field or the
 // reverse. Flags and arguments may also fall back to env and config.
 type InputReader struct {
-	parser       *Parser
-	configFiles  []ConfigFile
+	configFiles  []ConfigFileDef
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 	envPrefix    string            // InputSettings.EnvPrefix: scopes derived env-var names
 	sources      []recon.Source    // InputSettings.Sources: custom sources, after the declared files
@@ -85,10 +84,10 @@ func bindSettings(meta InputSettings) *boundSettings {
 // NewInputReader returns the default input reader, configured from the generated
 // [InputSettings]. It carries no features of its own: a read uses the features of the
 // [Context] it reads, so a reader set with [Program.WithInputReader] reads with the program's.
-func NewInputReader(meta InputSettings) *InputReader {
+func NewInputReader(settings InputSettings) *InputReader {
 	return &InputReader{
-		parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas,
-		envPrefix: meta.EnvPrefix, sources: meta.Sources, described: true,
+		configFiles: settings.ConfigFiles, stdinSchemas: settings.StdinSchemas,
+		envPrefix: settings.EnvPrefix, sources: settings.Sources, described: true,
 	}
 }
 
@@ -100,10 +99,10 @@ func NewInputReader(meta InputSettings) *InputReader {
 // others, with the recon cause reachable via errors.As, or a [*WiringError] when a command
 // declares config inputs but the program has no [InputSettings], or when reading needs a
 // [Feature] the program built with [NewWiredProgram] does not wire (its Feature names it).
-func (b *InputReader) Read(rtx *Context, out any) error { return rtx.withPath(b.bind(rtx, out)) }
+func (r *InputReader) Read(rtx *Context, out any) error { return rtx.withPath(r.bind(rtx, out)) }
 
-func (b *InputReader) bind(rtx *Context, out any) error {
-	if b == nil {
+func (r *InputReader) bind(rtx *Context, out any) error {
+	if r == nil {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil input reader"}
 	}
 	rv := reflect.ValueOf(out)
@@ -115,7 +114,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 
 	// 1. argv → a store, without validation: step 3 checks the reconciled store.
-	store, chain, err := parseArgvStore(b.parser, rtx, out)
+	store, chain, err := readArgvStore(rtx, out)
 	if err != nil {
 		return err
 	}
@@ -132,14 +131,14 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// profile selector names the profile it reads. The .env files in scope join the environment
 	// inputs read (under the run's own), and variable_file variables are read, before any other
 	// config_source path is looked up or any profile selected.
-	boot := fileBootstrap{paths: b.pathOverrides(chain, store, view)}
-	if view, err = b.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
+	boot := fileBootstrap{paths: r.pathOverrides(chain, store, view)}
+	if view, err = r.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
 		return err
 	}
 	if view.hasInputEnv() {
-		boot.paths = b.pathOverrides(chain, store, view)
+		boot.paths = r.pathOverrides(chain, store, view)
 	}
-	if boot.profiles, err = b.selectProfiles(fs, chain, store, view); err != nil {
+	if boot.profiles, err = r.selectProfiles(fs, chain, store, view); err != nil {
 		return err
 	}
 
@@ -156,7 +155,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// An unknown profile is reported before any value is read or checked: a value it would have
 	// supplied, a required one included, is otherwise reported in its place.
 	if fs.profiles != nil {
-		if err := fs.profiles.check(b, v, chain, boot, waived, view); err != nil {
+		if err := fs.profiles.check(r, v, chain, boot, waived, view); err != nil {
 			return err
 		}
 	}
@@ -167,7 +166,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		if fs.fallbacks == nil {
 			return missingIn(chain, "fallbacks", "Fallbacks()", fallbackSubject(v))
 		}
-		if err := fs.fallbacks.reconcile(b, v, chain, store, boot, anchor, waived, view); err != nil {
+		if err := fs.fallbacks.reconcile(r, v, chain, store, boot, anchor, waived, view); err != nil {
 			return err
 		}
 	}
@@ -188,7 +187,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	if err := b.readChannels(fs, chain, boot, v, waived, view); err != nil {
+	if err := r.readChannels(fs, chain, boot, v, waived, view); err != nil {
 		return err
 	}
 
@@ -196,25 +195,25 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	if _, _, ok := stdinTarget(v, waived); !ok {
 		return nil // before fillStdin, so no closure is built for a command without stdin
 	}
-	return b.fillStdin(rtx, v, waived, func(name string) ([]string, error) { return leafArgValues(chain, store, name), nil })
+	return r.fillStdin(rtx, v, waived, func(name string) ([]string, error) { return leafArgValues(chain, store, name), nil })
 }
 
 // readChannels is step 4 of a read: env + config → the Env/Config sub-structs, from
 // independent registries. A registry is built only when v describes inputs of that channel.
-func (b *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) error {
+func (r *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) error {
 	var err error
 	var envReg *recon.Registry
 	if hasEnvChannel(v) {
 		if fs.env == nil {
 			return missingIn(chain, "env", "Env()", fmt.Sprintf("command %q declares env inputs", pathOf(chain)))
 		}
-		if envReg, err = fs.env.registry(v, b.envPrefix, view); err != nil {
+		if envReg, err = fs.env.registry(v, r.envPrefix, view); err != nil {
 			return internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer envReg.Close()
 	}
 
-	if err := b.checkDescribed(v); err != nil {
+	if err := r.checkDescribed(v); err != nil {
 		return err
 	}
 
@@ -223,14 +222,14 @@ func (b *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBoo
 		if fs.config == nil {
 			return missingIn(chain, "config-files", "ConfigFiles()", fmt.Sprintf("command %q declares config inputs", pathOf(chain)))
 		}
-		if cfg, err = fs.config.regs(b, chain, boot, v, waived, view); err != nil {
+		if cfg, err = fs.config.regs(r, chain, boot, v, waived, view); err != nil {
 			return err
 		}
 		defer cfg.Close()
 	}
 
 	if envReg != nil || cfg != nil {
-		labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
+		labels := channelLabels{env: envNames(v, "Env", r.envPrefix), view: view}
 		if err := fs.channels.fill(v, envReg, cfg, waived, labels); err != nil {
 			return err
 		}
@@ -285,13 +284,13 @@ func trimAcquiredPayload(s string) string {
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present. A profile selector flag is never read from a configuration file: it
 // takes the profile the bootstrap selected.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, boot fileBootstrap, anchor int, waived bool, view *osView) error {
+func (r *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, boot fileBootstrap, anchor int, waived bool, view *osView) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
 	fs := view.clockRef().features()
-	cfgFiles := b.chainFiles(chain, false)
-	files, err := b.wiredFileSources(fs, chain, cfgFiles, boot, waived, view)
+	cfgFiles := r.chainFiles(chain, false)
+	files, err := r.wiredFileSources(fs, chain, cfgFiles, boot, waived, view)
 	if err != nil {
 		return err
 	}
@@ -303,11 +302,11 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	if len(files) == 0 && plainFallbackKeys(v) {
 		// The environment is the only source, and no key is read but its own: the argv layer
 		// holds only keys of flags set on argv, which are never read again.
-		env := flagEnv(v, b.envPrefix, view)
+		env := flagEnv(v, r.envPrefix, view)
 		reg = fallbackLookup{env: &env}
 	} else {
 		srcs := make([]recon.Source, 0, 2+len(files))
-		srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
+		srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, r.envPrefix, view))
 		srcs = append(srcs, files...)
 		r, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
@@ -324,7 +323,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	paths := pathFlags(cfgFiles)
 	envReg := reg
 	if paths != nil && len(files) > 0 {
-		env := flagEnv(v, b.envPrefix, view)
+		env := flagEnv(v, r.envPrefix, view)
 		envReg = fallbackLookup{env: &env}
 	}
 	for i := range v.NumField() {
@@ -357,6 +356,16 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 // spellings other tools use for the same thing.
 func firstSetEnv(view *osView, names string) string {
 	for name := range strings.SplitSeq(names, ",") {
+		if name != "" && view.inputGetenv(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// firstSetVar returns the first of names that is set to a non-empty value, or "".
+func firstSetVar(view *osView, names []string) string {
+	for _, name := range names {
 		if name != "" && view.inputGetenv(name) != "" {
 			return name
 		}
@@ -414,7 +423,7 @@ func reconcileFlag(reg fallbackLookup, field reflect.Value, sf reflect.StructFie
 
 // bindFlagFallback reads one flag's fallback from reg and binds it into field, returning the
 // argv-shaped values it bound, or nil when no source supplies one. The InputReader and the
-// overlay's env and files layers share it: a list binds item by item, a map from its leaves, a
+// overlay's env and config layers share it: a list binds item by item, a map from its leaves, a
 // string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
 // and a value the type cannot hold is an error naming where it came from. With rd.waiveFiles,
 // such a value from a configuration file is skipped instead, and the field keeps what it held.
@@ -459,7 +468,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelFlag, name, err.Error()+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelFlag, name, err.Error()+fromSource(origin), err)
 	}
 	vals = fallbackTimes(field.Type(), def, vals)
 	var prev reflect.Value
@@ -490,7 +499,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 // origin, where it came from.
 func flagFallbackValues(val recon.Value, t reflect.Type, name string, def FlagDef, chain []Command, idx int, origin string) ([]string, error) {
 	if problem := flagShapeProblem(val, t, isObjectFlag(&def)); problem != "" {
-		return nil, usageBind(channelFlag, name, fallbackLabel(chain, idx, name)+" "+problem+fromSource(origin), nil)
+		return nil, usageBind(InputErrorKindInvalidValue, channelFlag, name, fallbackLabel(chain, idx, name)+" "+problem+fromSource(origin), nil)
 	}
 	vals, err := fallbackValues(val, def.Separator)
 	if err != nil {
@@ -637,7 +646,7 @@ func checkConfigShapes(s reflect.Value, cfg *cfgRegs) error {
 		}
 		l := cfg.labels()
 		if problem := configShapeProblem(val, f.Type); problem != "" {
-			return usageBind(channelConfig, key, l.name(channelConfig, key)+" "+problem+l.origin(val.Source()), nil)
+			return usageBind(InputErrorKindInvalidValue, channelConfig, key, l.name(channelConfig, key)+" "+problem+l.origin(val.Source()), nil)
 		}
 		if derefType(f.Type).Kind() != reflect.Slice || val.Kind() != recon.SliceKind {
 			continue
@@ -645,7 +654,7 @@ func checkConfigShapes(s reflect.Value, cfg *cfgRegs) error {
 		items, _ := val.AsSlice()
 		for i, it := range items {
 			if it.Kind() == recon.NullKind {
-				return usageBind(channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
+				return usageBind(InputErrorKindInvalidValue, channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
 			}
 		}
 	}
@@ -726,7 +735,7 @@ func fallbackCoerceError(chain []Command, idx int, name, source string, err erro
 		return internalBind(channelFlag, name, fmt.Sprintf("%s: %s", label, mistake), err)
 	}
 	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)) + fromSource(source)
-	return usageBind(channelFlag, name, msg, err)
+	return usageBind(InputErrorKindInvalidValue, channelFlag, name, msg, err)
 }
 
 // recordOrigin notes where a reconciled fallback value came from (see scopeInputs.origin), so a
@@ -863,8 +872,8 @@ func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
 // program was built without any [InputSettings], which would otherwise leave every
 // configuration value silently zero. An empty InputSettings is legal: it declares that the
 // program has no configuration sources.
-func (b *InputReader) checkDescribed(v reflect.Value) error {
-	if b.described || !hasConfigChannel(v) {
+func (r *InputReader) checkDescribed(v reflect.Value) error {
+	if r.described || !hasConfigChannel(v) {
 		return nil
 	}
 	return &WiringError{Msg: "this command declares config: inputs, but the program " +
@@ -896,8 +905,8 @@ func configChannelOf(v reflect.Value) bool {
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. boot carries any config_source-supplied paths and the
 // selected profiles. A map several sources hold merges entry by entry ([mapMergeSource]).
-func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
-	srcs, err := b.fileSources(files, boot, waived, view)
+func (r *InputReader) configRegistry(files []ConfigFileDef, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
+	srcs, err := r.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -984,7 +993,7 @@ func sourceDesc(s recon.Source) string {
 // lazily-built single-file registries for inputs the spec pins to one file.
 type cfgRegs struct {
 	reader  *InputReader
-	files   []ConfigFile // sources in scope for the invoked chain, nearest-wins order
+	files   []ConfigFileDef // sources in scope for the invoked chain, nearest-wins order
 	boot    fileBootstrap
 	keys    valueKeys // how config fields' text is read; see spellings
 	merged  *recon.Registry
@@ -997,33 +1006,33 @@ type cfgRegs struct {
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
 // scope for chain. waived marks a short-circuited run ([shortCircuited]): a file that cannot be
 // read or parsed is skipped, and none is checked against its schema.
-func (b *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
-	files := b.chainFiles(chain, false)
+func (r *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
+	files := r.chainFiles(chain, false)
 	keys := channelValueKeys(v, "Config")
-	merged, paths, err := b.configRegistry(files, boot, keys, waived, view)
+	merged, paths, err := r.configRegistry(files, boot, keys, waived, view)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, boot: boot, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
+	return &cfgRegs{reader: r, files: files, boot: boot, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
 // nearest-wins: the invoked command's sources first, then each ancestor up to the root, each
 // command's own declared order preserved. Off-branch sources are excluded; an unscoped source
 // is always in scope and appended last.
-func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
-	if len(b.configFiles) == 0 {
+func (r *InputReader) chainConfigFiles(chain []Command) []ConfigFileDef {
+	if len(r.configFiles) == 0 {
 		return nil
 	}
-	var out []ConfigFile
+	var out []ConfigFileDef
 	for n := len(chain); n > 0; n-- { // leaf → root
-		for _, f := range b.configFiles {
+		for _, f := range r.configFiles {
 			if scopeIs(f.Scope, chain[:n]) {
 				out = append(out, f)
 			}
 		}
 	}
-	for _, f := range b.configFiles {
+	for _, f := range r.configFiles {
 		if f.Scope == "" {
 			out = append(out, f)
 		}
@@ -1347,15 +1356,15 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // containing the file winning. A path supplied through config_source is not optional, so a
 // missing one is an error. Custom InputSettings.Sources follow the declared files and so rank
 // below them.
-func (b *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
-	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
+func (r *InputReader) fileSources(files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+	srcs := make([]recon.Source, 0, len(files)+len(r.sources))
 	for _, f := range files {
 		var err error
-		if srcs, err = b.readFileSource(srcs, f, boot, waived, view); err != nil {
+		if srcs, err = r.readFileSource(srcs, f, boot, waived, view); err != nil {
 			return nil, err
 		}
 	}
-	return append(srcs, b.sources...), nil
+	return append(srcs, r.sources...), nil
 }
 
 // namedSource renames a recon source to its config_files logical name, since recon source
@@ -1415,8 +1424,8 @@ func sourcePaths(srcs []recon.Source) map[string]string {
 
 // wiredFileSources is [InputReader.fileSources] through the configuration files hook: no
 // sources when no file is in scope and no custom source is declared.
-func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
-	if len(files) == 0 && len(b.sources) == 0 {
+func (r *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+	if len(files) == 0 && len(r.sources) == 0 {
 		return nil, nil
 	}
 	if fs.config == nil {
@@ -1426,7 +1435,7 @@ func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []
 		}
 		return nil, missingIn(chain, "config-files", "ConfigFiles()", subject)
 	}
-	return fs.config.fileSources(b, files, boot, waived, view)
+	return fs.config.fileSources(r, files, boot, waived, view)
 }
 
 // readFileSource builds the recon sources for one config_files entry, schema-checked: paths
@@ -1435,7 +1444,7 @@ func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []
 // then the shared keys. In a short-circuited run (waived) a file that cannot be located, read
 // or parsed is skipped, standing in as an empty source under its own name so precedence holds,
 // and no file is checked against its schema.
-func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+func (r *InputReader) readFileSource(dst []recon.Source, f ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	skipped := func() []recon.Source {
 		return append(dst, namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name})
 	}
@@ -1443,7 +1452,7 @@ func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 	if f.Profiles != nil && fs.profiles == nil {
 		return nil, profilesMissing(f)
 	}
-	src, path, err := b.openFileSource(f, boot.paths, view)
+	src, path, err := r.openFileSource(f, boot.paths, view)
 	if err != nil {
 		if waived && !isWiringError(err) {
 			return skipped(), nil
@@ -1475,7 +1484,7 @@ func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 
 // profilesMissing is the error for a profiled configuration file in a program that does not
 // wire profiles.
-func profilesMissing(f ConfigFile) *WiringError {
+func profilesMissing(f ConfigFileDef) *WiringError {
 	return missingFeature("config-profiles", "Profiles()", fmt.Sprintf("configuration file %q has profiles", f.Name))
 }
 
@@ -1488,7 +1497,7 @@ func isWiringError(err error) bool {
 // openFileSource locates and parses one config_files entry, returning the source and the file
 // it resolved to. Rotini expands the path and runs the discover search itself, from the run's
 // view, so recon reads exactly the absolute path it is given.
-func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
+func (r *InputReader) openFileSource(f ConfigFileDef, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
@@ -1499,7 +1508,7 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	switch {
 	case overridden:
 		if override.emptyFlag != "" {
-			return nil, "", usageBind(channelConfig, f.Name, override.emptyFlag+" was given an empty path; name a configuration file", nil)
+			return nil, "", usageBind(InputErrorKindFileAccess, channelConfig, f.Name, override.emptyFlag+" was given an empty path; name a configuration file", nil)
 		}
 		path = override.path
 		opts = append(opts, recon.WithOptional(false))
@@ -1535,10 +1544,10 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 		if isWiringError(err) {
 			return nil, "", err
 		}
-		return nil, "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
+		return nil, "", usageBind(InputErrorKindFileAccess, channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
 	}
 	if dirs != nil {
-		resolved = searchFile(dirs, filepath.Base(resolved))
+		resolved = searchFile(view, dirs, filepath.Base(resolved))
 	}
 	fs := view.clockRef().features()
 	c, err := fs.codecFor(f.Format, resolved)
@@ -1549,14 +1558,22 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	if o, ok := view.files.opened(key); ok {
 		return o.src, resolved, o.err
 	}
-	src, err := newFileSource(fs, resolved, c, opts...)
+	var src recon.Source
+	if view.fileSystem() != nil {
+		src, err = newFSFileSource(view, fs, resolved, c, f.Format, !overridden)
+	} else {
+		src, err = newFileSource(fs, resolved, c, opts...)
+	}
 	if err != nil {
 		// The file's content or path is the user's to fix.
-		err = usageBind(channelConfig, f.Name, configFileProblem(resolved, err), err)
+		err = usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(view, resolved, err), err)
 		view.files.keep(key, openedFile{err: err})
 		return nil, "", err
 	}
 	view.files.keep(key, openedFile{src: src})
+	if fsrc, ok := src.(fileDoc); ok && view.files != nil && f.As != "env" {
+		view.files.docs = append(view.files.docs, openedDoc{file: f, src: fsrc, codec: c})
+	}
 	return src, resolved, nil
 }
 
@@ -1567,6 +1584,16 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 type fileCache struct {
 	files   map[openedKey]openedFile
 	checked map[checkedKey]error
+	// docs is each configuration file (not an `as: env` file) opened, in opening order, for
+	// [InputReport.UnreadConfigKeys].
+	docs []openedDoc
+}
+
+// openedDoc is one configuration file opened, and the entry it was opened for.
+type openedDoc struct {
+	file  ConfigFileDef
+	src   fileDoc
+	codec *codecEntry // what it was decoded with; nil when recon chose by its extension
 }
 
 // openedKey identifies one opening of a configuration file: the entry, the file it resolved to,
@@ -1636,13 +1663,13 @@ func (c *fileCache) check(k checkedKey, run func() error) error {
 
 // searchFile returns the first of dirs holding name, else name in the first directory, as a
 // discover search resolves it.
-func searchFile(dirs []string, name string) string {
+func searchFile(view *osView, dirs []string, name string) string {
 	if len(dirs) == 1 {
 		return filepath.Join(dirs[0], name) // found or not, the one directory is the answer
 	}
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
+		if _, err := view.stat(p); err == nil {
 			return p
 		}
 	}
@@ -1654,7 +1681,7 @@ func searchFile(dirs []string, name string) string {
 
 // configFileProblem says why a configuration file could not be used: where a syntax error is
 // and what it is, or why the file could not be read.
-func configFileProblem(path string, err error) string {
+func configFileProblem(view *osView, path string, err error) string {
 	if de, ok := asError[*toml.DuplicateKeyError](err); ok {
 		at := strconv.Itoa(de.Pos.Line)
 		if de.Pos.Column > 0 {
@@ -1670,7 +1697,7 @@ func configFileProblem(path string, err error) string {
 		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
 	reason := "cannot be read: " + innermostCause(err).Error()
-	info, statErr := os.Stat(path)
+	info, statErr := view.stat(path)
 	switch {
 	case statErr == nil && info.IsDir():
 		reason = "is a directory"
@@ -1684,6 +1711,18 @@ func configFileProblem(path string, err error) string {
 		reason = "unsupported format"
 	}
 	return fmt.Sprintf("could not open configuration file %s: %s", path, reason)
+}
+
+// configFileKind classifies an error [configFileProblem] words: a file that could not be
+// parsed, else one that could not be opened or read.
+func configFileKind(err error) InputErrorKind {
+	if _, ok := asError[*toml.DuplicateKeyError](err); ok {
+		return InputErrorKindMalformedDocument
+	}
+	if _, ok := asError[*recon.ParseError](err); ok {
+		return InputErrorKindMalformedDocument
+	}
+	return InputErrorKindFileAccess
 }
 
 // innermostCause returns the error at the end of err's chain, which names the cause without
@@ -1719,18 +1758,18 @@ func absPath(view *osView, p string) (string, error) {
 // declared schema — the same load-time gate stdin applies to its payload — against the file
 // recon actually resolved. An absent optional file passes vacuously: shape validation gates
 // what is loaded, and absence is the per-input required marker's concern.
-func validateConfigFile(fs *featureSet, f ConfigFile, src recon.Source) error {
+func validateConfigFile(fs *featureSet, f ConfigFileDef, src recon.Source) error {
 	return validateConfigFileAs(fs, f, src, "")
 }
 
 // validateConfigFileAs is [validateConfigFile] for a run that selected profile: a file with
 // profiles is checked as the run reads it, its shared keys merged with the selected profile's
 // (see effectiveDocument). Profiles that aren't selected are not checked.
-func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profile string) error {
+func validateConfigFileAs(fs *featureSet, f ConfigFileDef, src recon.Source, profile string) error {
 	if f.Schema == "" {
 		return nil
 	}
-	fsrc, ok := src.(*recon.FileSource)
+	fsrc, ok := src.(fileDoc)
 	if !ok {
 		return nil
 	}
@@ -1741,12 +1780,12 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 	var data []byte
 	if !decoded {
 		var err error
-		if data, err = os.ReadFile(path); err != nil {
+		if data, err = sourceView(src).readFile(path); err != nil {
 			if os.IsNotExist(err) {
 				return nil // absent: vacuous
 			}
 			// A present-but-unreadable file the user controls.
-			return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
+			return usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(sourceView(src), path, err), err)
 		}
 	}
 	if fs.schemas == nil {
@@ -1758,7 +1797,7 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 // checkConfigDocument is the rest of validateConfigFileAs once the program is known to wire
 // Schemas(), which installs it: a program that doesn't, doesn't link it. m is the document the
 // source decoded when decoded, else data holds the file read again.
-func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m map[string]any, decoded bool, data []byte, profile string) error {
+func checkConfigDocument(fs *featureSet, f ConfigFileDef, fsrc fileDoc, m map[string]any, decoded bool, data []byte, profile string) error {
 	path := fsrc.Path()
 	c, err := fs.codecFor(fsrc.Format(), path)
 	if err != nil {
@@ -1770,7 +1809,7 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 	if !decoded {
 		if m, err = c.codec().Decode(stripBOM(data)); err != nil {
 			pe := fileParseError(path, err)
-			return usageBind(channelConfig, f.Name, configFileProblem(path, pe), pe)
+			return usageBind(configFileKind(pe), channelConfig, f.Name, configFileProblem(sourceView(fsrc), path, pe), pe)
 		}
 	}
 	if f.Profiles != nil {
@@ -1782,22 +1821,105 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 	}
 	if err := validator.Validate(m); err != nil {
 		fs.schemas.patternMessages(f.Schema, err)
-		where := path
+		where, got := path, ""
+		ve, isVE := asError[*recon.ValidationError](err)
+		if isVE {
+			if at := violationAt(sourceView(fsrc), c, data, decoded, path, ve.Path, f, profile); at != "" {
+				where += ":" + at
+			}
+			got = violationValue(m, ve, f)
+		}
 		if f.Profiles != nil && profile != "" {
 			where += " (profile " + profile + ")"
 		}
-		return usageBind(channelConfig, f.Name,
-			fmt.Sprintf("configuration file %s %s", where, schemaVerdict(err, "is invalid")), err)
+		if isVE && forbiddenKey(ve) {
+			return unknownFileKey(f, where, ve, err)
+		}
+		return usageBind(InputErrorKindSchemaViolation, channelConfig, f.Name,
+			fmt.Sprintf("configuration file %s %s%s", where, schemaVerdict(err, "is invalid"), got), err)
 	}
 	return nil
+}
+
+// violationAt is the "line:col" of the value at at, which a schema check of configuration file
+// f (read from path) rejected, or "" when its codec gives no positions or the value isn't
+// found. data is the file as read, unless the document was decoded when it was opened. The
+// selected profile's section is looked in first, then the shared keys.
+func violationAt(view *osView, c *codecEntry, data []byte, decoded bool, path string, at recon.Path, f ConfigFileDef, profile string) string {
+	if c.locate == nil || len(at) == 0 {
+		return ""
+	}
+	if decoded {
+		var err error
+		if data, err = view.readFile(path); err != nil {
+			return ""
+		}
+	}
+	data = stripBOM(data)
+	tries := [][]string{at}
+	if f.Profiles != nil && profile != "" {
+		tries = [][]string{append([]string{f.Profiles.Under, profile}, at...), at}
+	}
+	for _, p := range tries {
+		if line, col, ok := c.locate(data, p); ok {
+			return strconv.Itoa(line) + ":" + strconv.Itoa(col)
+		}
+	}
+	return ""
+}
+
+// secretAt reports whether the value at dotted path key of the file is secret: the value of a
+// key declared secret, or any value below one (a list's item, a map's entry, an object's field).
+func (f ConfigFileDef) secretAt(key string) bool {
+	return slices.ContainsFunc(f.Keys, func(k ConfigKeyDef) bool {
+		return k.Secret && (key == k.Key || strings.HasPrefix(key, k.Key+"."))
+	})
+}
+
+// violationValue is the " (got <value>)" suffix naming the scalar value a schema check
+// rejected at ve's path in document m, or "" for a list, a map, a missing value, or a secret
+// key's value or a value below one.
+func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFileDef) string {
+	if ve.Secret || len(ve.Path) == 0 || f.secretAt(strings.Join(ve.Path, ".")) {
+		return ""
+	}
+	var v any = m
+	for _, seg := range ve.Path {
+		switch node := v.(type) {
+		case map[string]any:
+			next, ok := node[seg]
+			if !ok {
+				return ""
+			}
+			v = next
+		case []any:
+			i, err := strconv.Atoi(seg)
+			if err != nil || i < 0 || i >= len(node) {
+				return ""
+			}
+			v = node[i]
+		default:
+			return ""
+		}
+	}
+	switch v := v.(type) {
+	case string:
+		return fmt.Sprintf(" (got %q)", v)
+	case map[string]any, []any:
+		return ""
+	case nil:
+		return " (got null)"
+	default:
+		return fmt.Sprintf(" (got %v)", v)
+	}
 }
 
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
-func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
+func (r *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
 	var out map[string]pathOverride // made by the first override: read-only, so nil serves none
-	for _, f := range b.chainConfigFiles(chain) {
+	for _, f := range r.chainConfigFiles(chain) {
 		pf := f.PathFrom
 		if pf == nil {
 			continue
@@ -1811,8 +1933,8 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 			out[f.Name] = pathOverride{emptyFlag: chainFlagLabel(chain, pf.Flag)}
 		case explicit != "":
 			out[f.Name] = pathOverride{path: explicit}
-		case firstSetEnv(view, pf.Env) != "":
-			out[f.Name] = pathOverride{path: view.inputGetenv(firstSetEnv(view, pf.Env))}
+		case firstSetVar(view, pf.Env) != "":
+			out[f.Name] = pathOverride{path: view.inputGetenv(firstSetVar(view, pf.Env))}
 		case defaulted != "":
 			out[f.Name] = pathOverride{path: defaulted, declared: true}
 		}
@@ -1822,7 +1944,7 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 
 // pathFlags is the set of files' config_source flags. A path that names a configuration file
 // is never read from one, so these flags fall back to the environment alone.
-func pathFlags(files []ConfigFile) map[string]bool {
+func pathFlags(files []ConfigFileDef) map[string]bool {
 	var out map[string]bool
 	for _, f := range files {
 		if f.PathFrom == nil || f.PathFrom.Flag == "" {
@@ -2109,7 +2231,7 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 		// An unparseable value passes through as text so recon reports it as a usage error
 		// naming the input; an error returned from Get would be swallowed.
 		ts.clock = s.clock
-		if t, perr := parseTimeValue(v.String(), ts); perr == nil {
+		if t, perr := parseTime(v.String(), ts); perr == nil {
 			return recon.NewValue(t), true, nil
 		}
 	}
@@ -2199,11 +2321,11 @@ func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 		name := et.Field(j).Tag.Get("rotini")
 		fam, err := envFamily(view, base, sep)
 		if err != nil {
-			return filled, usageBind(channelEnv, name, err.Error(), nil)
+			return filled, usageBind(InputErrorKindInvalidValue, channelEnv, name, err.Error(), nil)
 		}
 		if len(fam) == 0 {
 			if opt == "required" {
-				return filled, usageBind(channelEnv, name,
+				return filled, usageBind(InputErrorKindMissingRequired, channelEnv, name,
 					fmt.Sprintf("environment variables %s%s* are required for %s", base, sep, name), nil)
 			}
 			continue
@@ -2279,6 +2401,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
+	fs := labels.view.clockRef().features()
 	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
 			continue
@@ -2290,18 +2413,15 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 				if envReg == nil {
 					continue
 				}
-				if err := checkEnvMaps(ci.Field(j), envReg, labels); err != nil {
-					return err
-				}
-				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return labels.bindStruct(channelEnv, err, envReg, ci.Field(j))
-				}
-				if _, err := fillEnvNested(ci.Field(j), labels.view); err != nil {
+				if err := fillEnv(ci.Field(j), envReg, waived, labels); err != nil {
 					return err
 				}
 			case "Config":
 				if cfg == nil {
 					continue
+				}
+				if err := checkTimeChannel(fs, ci.Field(j)); err != nil {
+					return err
 				}
 				if err := fillConfig(ci.Field(j), cfg, waived); err != nil {
 					return err
@@ -2310,6 +2430,22 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 		}
 	}
 	return nil
+}
+
+// fillEnv recon-binds one Env struct from envReg and fills its nested env inputs (see
+// fillChannels).
+func fillEnv(s reflect.Value, envReg *recon.Registry, waived bool, labels channelLabels) error {
+	if err := checkTimeChannel(labels.view.clockRef().features(), s); err != nil {
+		return err
+	}
+	if err := checkEnvMaps(s, envReg, labels); err != nil {
+		return err
+	}
+	if err := bindReconWaived(envReg, s.Addr().Interface(), waived); err != nil {
+		return labels.bindStruct(channelEnv, err, envReg, s)
+	}
+	_, err := fillNestedEnv(s, labels.view)
+	return err
 }
 
 // fillConfig recon-binds one Config struct from cfg (see fillChannels).
@@ -2428,12 +2564,12 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		// A list is checked element by element as bound, since an environment variable's list
 		// arrives as one string.
 		if elems, count, ok := typedElems(s.Field(j)); ok && isArrayType(typ) {
-			if err := checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view.base()); err != nil {
+			if err := checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view); err != nil {
 				return withOrigin(err, origin)
 			}
 			continue
 		}
-		if err := checkConstraints(view.clockRef().features(), label, typ, f.Tag.Get("base"), c, vals, secret, view.base()); err != nil {
+		if err := checkConstraints(view.clockRef().features(), label, typ, f.Tag.Get("base"), c, vals, secret, view); err != nil {
 			return withOrigin(err, origin)
 		}
 	}
@@ -2581,27 +2717,93 @@ const (
 	channelFlag   = "flag"
 )
 
+// InputErrorKind classifies an [*InputError] so a reporter can branch on the failure without
+// matching the message. A kind the command line also has shares its [ParseKind]'s name
+// (invalid-value, enum-violation, constraint-violation, missing-required, internal); the others
+// are failures only a file, the environment or stdin can have.
+type InputErrorKind int
+
+// The input failure kinds.
+const (
+	// InputErrorKindUnspecified is the zero value: an [*InputError] whose construction site did
+	// not classify it (a hand-built error that sets no Kind).
+	InputErrorKindUnspecified         InputErrorKind = iota
+	InputErrorKindInvalidValue                       // a value its input's type or shape can't hold: a wrong type, a list for one value, a null list item, a malformed map entry, an empty value
+	InputErrorKindEnumViolation                      // a value was not one of a declared enum's members
+	InputErrorKindConstraintViolation                // a rule across inputs was broken: a variable and its _FILE twin both set
+	InputErrorKindMissingRequired                    // a required environment variable, config key or stdin payload was absent
+	InputErrorKindSchemaViolation                    // a configuration file, stdin document or record does not match its JSON Schema, or could not be fully checked against it
+	InputErrorKindMalformedDocument                  // a configuration file or stdin could not be parsed: a syntax error, a duplicate key, text that is not UTF-8
+	InputErrorKindFileAccess                         // a configuration file, or a file an environment variable names, could not be found, resolved, opened, read or written
+	InputErrorKindUnknownProfile                     // a profile was chosen that the configuration file does not define
+	InputErrorKindUnknownKey                         // a configuration write named a key the command does not read, or a configuration file holds a key its schema forbids (additionalProperties: false)
+	InputErrorKindWriteRefused                       // a configuration write rotini won't make: a secret key, an object value, a file others can read
+	InputErrorKindInterrupted                        // the run's signal interrupted reading stdin
+	InputErrorKindInternal                           // the program's mistake: a registry that could not be built, a schema that does not compile, a payload type that does not fit
+)
+
+// String renders the kind as a short, stable label (for logs, tests and structured output).
+func (k InputErrorKind) String() string {
+	switch k {
+	case InputErrorKindInvalidValue:
+		return "invalid-value"
+	case InputErrorKindEnumViolation:
+		return "enum-violation"
+	case InputErrorKindConstraintViolation:
+		return "constraint-violation"
+	case InputErrorKindMissingRequired:
+		return "missing-required"
+	case InputErrorKindSchemaViolation:
+		return "schema-violation"
+	case InputErrorKindMalformedDocument:
+		return "malformed-document"
+	case InputErrorKindFileAccess:
+		return "file-access"
+	case InputErrorKindUnknownProfile:
+		return "unknown-profile"
+	case InputErrorKindUnknownKey:
+		return "unknown-key"
+	case InputErrorKindWriteRefused:
+		return "write-refused"
+	case InputErrorKindInterrupted:
+		return "interrupted"
+	case InputErrorKindInternal:
+		return "internal"
+	default:
+		return "unspecified"
+	}
+}
+
 // InputError reports a failure acquiring or decoding one of a command's non-argv input
 // channels: environment variables, configuration files, a typed stdin payload, or a flag's or
 // argument's env/config fallback. It is the counterpart of the argv channel's [*ParseError].
 //
 // Error names the channel, the input, and what went wrong. The underlying recon, decode or OS
 // Cause is reachable via errors.As but kept out of the message, and the value of an input
-// marked secret is redacted.
+// marked secret is redacted. Kind says what went wrong without the message, and Command and
+// [InputError.Path] say whose input it was, so a reporter can word the failure its own way.
 //
 // A bad value, a missing required input, or a malformed document the user supplied is
 // [CategoryUsage]; a registry build, schema compile, IO read, or codegen mismatch is
-// [CategoryInternal].
+// [CategoryInternal] ([InputErrorKindInternal]).
 //
-//	var be *rotini.InputError
-//	if errors.As(err, &be) {
-//	    fmt.Fprintf(os.Stderr, "bad %s input %q: %s\n", be.Channel, be.Input, be.Error())
+//	var ie *rotini.InputError
+//	if errors.As(err, &ie) {
+//	    switch ie.Kind {
+//	    case rotini.InputErrorKindMalformedDocument, rotini.InputErrorKindSchemaViolation:
+//	        fmt.Fprintf(os.Stderr, "%s: check your configuration file: %s\n", ie.Path(), ie.Msg)
+//	    }
 //	}
 type InputError struct {
-	Channel string // one of "env", "config", "stdin", "flag", "argument"
-	Input   string // the offending input key/path, when a single one is known (else "")
-	Msg     string // the message Error returns; it never includes Cause's text
-	Cause   error  // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+	Kind    InputErrorKind // what went wrong, for branching without matching Msg (zero = InputErrorKindUnspecified)
+	Channel string         // one of "env", "config", "stdin", "flag", "argument"
+	Input   string         // the offending input key/path, when a single one is known (else "")
+	Msg     string         // the message Error returns; it never includes Cause's text
+	Cause   error          // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+
+	// Command is the name of the command whose inputs were read ("" until the error leaves
+	// the read that made it).
+	Command string
 
 	// Token and Candidates are set when a value is not one of an env or config input's enum:
 	// the rejected value ("[redacted]" for a secret input) and the allowed values. They are
@@ -2622,6 +2824,11 @@ func (e *InputError) Error() string {
 	return e.path + ": " + e.Msg
 }
 
+// Path returns the path of the command the error is reported against, as Error prints it
+// first ("taskr add"), or "" when Error prints none: an internal error, or one that has not
+// left the read that made it.
+func (e *InputError) Path() string { return e.path }
+
 // Unwrap returns Cause, when set, and the category sentinel, [ErrUsage] or [ErrInternal].
 func (e *InputError) Unwrap() []error {
 	sentinel := ErrInternal
@@ -2634,14 +2841,32 @@ func (e *InputError) Unwrap() []error {
 	return []error{e.Cause, sentinel}
 }
 
-// usageBind builds a [CategoryUsage] *InputError: bad input the end user can fix.
-func usageBind(channel, input, msg string, cause error) *InputError {
-	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
+// usageBind builds a [CategoryUsage] *InputError of kind: bad input the end user can fix.
+func usageBind(kind InputErrorKind, channel, input, msg string, cause error) *InputError {
+	return &InputError{Kind: kind, Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
 }
 
-// internalBind builds a [CategoryInternal] *InputError: a failure the author must fix.
+// internalBind builds a [CategoryInternal] *InputError, of [InputErrorKindInternal]: a failure
+// the author must fix.
 func internalBind(channel, input, msg string, cause error) *InputError {
-	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause}
+	return &InputError{Kind: InputErrorKindInternal, Channel: channel, Input: input, Msg: msg, Cause: cause}
+}
+
+// inputKindOf is the [InputErrorKind] for a value check's [ParseKind], when a channel reports
+// the check's failure as an [*InputError].
+func inputKindOf(k ParseKind) InputErrorKind {
+	switch k {
+	case ParseKindEnumViolation:
+		return InputErrorKindEnumViolation
+	case ParseKindConstraintViolation:
+		return InputErrorKindConstraintViolation
+	case ParseKindMissingRequired:
+		return InputErrorKindMissingRequired
+	case ParseKindInternal:
+		return InputErrorKindInternal
+	default:
+		return InputErrorKindInvalidValue
+	}
 }
 
 // reconBind converts a recon error for one channel into a clean, categorized [*InputError]. It

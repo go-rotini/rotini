@@ -94,11 +94,10 @@ reads the typed, validated inputs; `--help` is answered for every command by the
 to the imports:
 
 {{< code title="helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
-func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"
@@ -106,6 +105,7 @@ func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		greeting = strings.ToUpper(greeting)
 	}
 	fmt.Fprintln(rtx.Stdout, greeting)
+	return nil
 }
 {{< /code >}}
 

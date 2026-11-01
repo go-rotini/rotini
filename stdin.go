@@ -276,7 +276,7 @@ func (s *stdinState) streamLocked() *cancelReader {
 // internal read failure.
 func stdinReadError(run *stdinRun, err error) error {
 	if errors.As(err, new(readEndedError)) || run.interrupted(err) {
-		return usageBind(channelStdin, "", "reading stdin was interrupted", err)
+		return usageBind(InputErrorKindInterrupted, channelStdin, "", "reading stdin was interrupted", err)
 	}
 	return internalBind(channelStdin, "", "could not read stdin", err)
 }

@@ -113,20 +113,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*helloworldHelloHandler)(nil)
+var _ rotini.HandlerE = (*helloworldHelloHandler)(nil)
 
 type helloworldHelloHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"
@@ -134,6 +133,7 @@ func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		greeting = strings.ToUpper(greeting)
 	}
 	fmt.Fprintln(rtx.Stdout, greeting)
+	return nil
 }
 ```
 

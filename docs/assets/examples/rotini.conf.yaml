@@ -18,6 +18,9 @@ generate:
       file: internal/cmd/deploy/zz_rotini.go
       package: deploy
       header: "// Copyright 2026 Example, Inc."
+      hook_returns: error
+      stub_template: internal/cmd/deploy/templates/stub.go.tmpl
+      stub_test_template: internal/cmd/deploy/templates/stub_test.go.tmpl
       keep: [store.go]
     - type: models
       file: internal/models/zz_models.go
@@ -61,11 +64,20 @@ generate:
   contract:
     file: cmd/deploy/cli-contract.json
     go: true
+  generators:
+    - name: catalog
+      run: [go, run, ./tools/catalog]
+      dir: catalog/deploy
+      keep: [README.md]
   dry_run_env: CI
 validate:
   fail: collect
+  input_summaries: false
+  help_width: 100
   flags_first: false
   posix_names: false
+  exit_status_drops_root: false
+  exit_status_one: false
   release_env: RELEASE
 diff:
   accept:

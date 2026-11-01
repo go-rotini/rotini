@@ -11,10 +11,20 @@ command:
     - TASKR_TOKEN=abc ./taskr sync --status "$STATUS"
     - $ taskr list --status <status> > tasks.txt 2>&1
     - kubectl taskr list -s open
-    - taskr ls --fmt && taskr add 'a b' --prio=3
-    - taskr list --status open; taskr old
+    - taskr ls && taskr add 'a b' --prio=3
     - taskr remote anything --at all
     - taskr sync --token abc --cert certs/missing.pem --out no-such-dir/out.txt
+    - run: taskr login --password @secret.txt --key -
+      summary: Log in with the password in a file
+    # Parses, but teaches what a user shouldn't type: a deprecated command, flag and value, a
+    # hidden alias, identifier and value, and literal secrets.
+    - taskr list --status open; taskr old
+    - taskr older
+    - taskr list --done --status finished
+    - taskr ls --fmt
+    - taskr list --status archived
+    - run: taskr login --password hunter2 --key abc
+      summary: Log in
     # Wrong: an unknown command, an unknown flag, a bad enum value, a missing argument, a
     # mutually exclusive pair, an extra argument in a later segment, the root's own flag
     # given with a sub-command, an unclosed quote.
@@ -46,10 +56,19 @@ command:
       flags:
         - name: status
           identifiers: [-s, --status]
-          schema: { type: string, enum: [open, done] }
+          schema:
+            type: string
+            enum:
+              - open
+              - { value: done, aliases: [finished], deprecated_aliases: [finished] }
+              - { value: archived, hidden: true }
         - name: json
           identifiers: [--json]
           hidden_identifiers: [--fmt]
+          schema: { type: bool }
+        - name: done
+          identifiers: [--done]
+          deprecated: use --status done
           schema: { type: bool }
     - name: add
       flags:
@@ -76,3 +95,11 @@ command:
     - name: old
       hidden_aliases: [older]
       deprecated: use list
+    - name: login
+      flags:
+        - name: password
+          identifiers: [--password]
+          schema: { type: string, secret: true, from: [file] }
+        - name: key
+          identifiers: [--key]
+          schema: { type: string, secret: true, from: [stdin] }

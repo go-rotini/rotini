@@ -20,8 +20,9 @@ import (
 func JSON() Feature {
 	return Feature{name: "codec:json", apply: func(s *featureSet) {
 		s.addCodec(&codecEntry{
-			name:  "json",
-			codec: func() recon.Codec { return recon.JSON },
+			name:   "json",
+			codec:  func() recon.Codec { return recon.JSON },
+			locate: locateJSONC,
 			decodeAny: func(data []byte) (any, error) {
 				if err := invalidUTF8("json", data); err != nil {
 					return nil, err
@@ -46,8 +47,9 @@ func JSON() Feature {
 func YAML() Feature {
 	return Feature{name: "codec:yaml", apply: func(s *featureSet) {
 		s.addCodec(&codecEntry{
-			name:  "yaml",
-			codec: func() recon.Codec { return recon.YAML },
+			name:   "yaml",
+			codec:  func() recon.Codec { return recon.YAML },
+			locate: locateYAML,
 			decodeAny: func(data []byte) (any, error) {
 				if err := invalidUTF8("yaml", data); err != nil {
 					return nil, err
@@ -72,7 +74,7 @@ func YAML() Feature {
 // TOML wires the TOML document format, for configuration files and stdin documents.
 func TOML() Feature {
 	return Feature{name: "codec:toml", apply: func(s *featureSet) {
-		s.addCodec(&codecEntry{name: "toml", codec: func() recon.Codec { return recon.TOML }})
+		s.addCodec(&codecEntry{name: "toml", codec: func() recon.Codec { return recon.TOML }, locate: locateTOML})
 	}}
 }
 
@@ -81,8 +83,9 @@ func TOML() Feature {
 func JSONC() Feature {
 	return Feature{name: "codec:jsonc", apply: func(s *featureSet) {
 		s.addCodec(&codecEntry{
-			name:  "jsonc",
-			codec: func() recon.Codec { return recon.JSONC },
+			name:   "jsonc",
+			codec:  func() recon.Codec { return recon.JSONC },
+			locate: locateJSONC,
 			decodeAny: func(data []byte) (any, error) {
 				if err := invalidUTF8("jsonc", data); err != nil {
 					return nil, err
@@ -109,6 +112,159 @@ func Dotenv() Feature {
 	return Feature{name: "codec:dotenv", apply: func(s *featureSet) {
 		s.addCodec(&codecEntry{name: "dotenv", codec: func() recon.Codec { return recon.Dotenv }})
 	}}
+}
+
+// Codec wires a document format of the program's own for configuration files and stdin
+// documents. A config_files entry or a stdin declared with `format: <name>` reads with it,
+// and so does a configuration file with no declared format whose extension [CodecExtensions]
+// lists. Given a built-in format's name ("yaml"), it replaces that format's codec, object flags
+// included. The spec names the format; the program adds the codec:
+//
+//	cmd.NewProgram().WithFeatures(rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini")))
+//
+// decode turns a whole document into the generic tree the built-in formats produce: a
+// map[string]any for each mapping, []any for each list, and strings, bools, numbers and nil for
+// scalars. A configuration file's top level must be a mapping; a stdin document's may be any
+// value its declared type takes. Rotini keeps precedence, profiles, schema checks, provenance and
+// --explain-inputs as they are for the built-in formats, so decode only reads. To read as
+// strictly as they do, decode must:
+//
+//   - fail on a key given twice in one mapping, rather than keep either value;
+//   - fail on input holding more than one document;
+//   - return nil for the format's null, which rotini treats as unset, never the text "null";
+//   - keep nothing of data once it returns, since the caller may reuse it.
+//
+// CheckCodec in package rotinitest checks a decode against these rules. A decode error with
+// Position() (line, col int) and Message() string methods is reported at that position.
+//
+// Name must match ^[a-z][a-z0-9-]*$, and decode must not be nil; Codec panics otherwise.
+// Writing to a file in the format ([SetConfigValue], [UnsetConfigValue]) is refused with
+// [InputErrorKindWriteRefused], unless [CodecEncode] gives the codec an encoder.
+func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOption) Feature {
+	if !validCodecName(name) {
+		panic(fmt.Sprintf("rotini: Codec: format name %q must match ^[a-z][a-z0-9-]*$", name))
+	}
+	if decode == nil {
+		panic(fmt.Sprintf("rotini: Codec %q: nil decode", name))
+	}
+	c := &codecEntry{name: name, author: true}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	rc := &authorCodec{name: name, exts: c.exts, decode: decode, encode: c.encode}
+	c.codec = func() recon.Codec { return rc }
+	c.decodeAny = func(data []byte) (any, error) {
+		v, err := decode(data)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", name, err)
+		}
+		return v, nil
+	}
+	return Feature{name: "codec:" + name, author: true, apply: func(s *featureSet) { s.replaceCodec(c) }}
+}
+
+// CodecOption configures a format wired with [Codec].
+type CodecOption func(*codecEntry)
+
+// CodecExtensions lists the file extensions that a configuration file with no declared format
+// is read with the codec for. An extension may be given with or without its dot, in any case:
+// "ini", ".ini" and ".INI" all mean .ini. A later codec claiming an extension wins over an
+// earlier one, and over a built-in format.
+func CodecExtensions(exts ...string) CodecOption {
+	return func(c *codecEntry) {
+		for _, e := range exts {
+			e = strings.TrimPrefix(strings.ToLower(e), ".")
+			if e == "" {
+				continue
+			}
+			if e = "." + e; !slices.Contains(c.exts, e) {
+				c.exts = append(c.exts, e)
+			}
+		}
+	}
+}
+
+// CodecLocate gives the codec a way to find where a value sits in a document, so an error about
+// one of a configuration file's values names its line and column (app.ini:3:1), as it does for
+// the built-in formats. locate is given the document and the value's path, its mapping keys and
+// list indexes outermost first, and returns the 1-indexed line and column, or ok false when it
+// can't tell.
+func CodecLocate(locate func(data []byte, path []string) (line, col int, ok bool)) CodecOption {
+	return func(c *codecEntry) { c.locate = locate }
+}
+
+// CodecEncode lets [SetConfigValue] and [UnsetConfigValue] write configuration files in the
+// codec's format. The write decodes the file, changes the key in the decoded tree, with the
+// same checks, profiles, secret rules and schema check as a built-in format, and replaces the
+// file with encode's text for the whole edited tree.
+//
+// Unlike a built-in format, which is edited in place with its comments and layout kept, a file
+// in the codec's format is rewritten whole: what encode writes is all the file holds, so
+// keeping comments, key order and formatting is the encoder's work. encode is given the tree
+// decode returns, with the edit applied: a map[string]any at the top level, and values a
+// write adds as strings, bools, int64, uint64, float64, and []any or map[string]any of those.
+// A value it can't write is an error, which refuses the write. Decoding what encode returns
+// must give back the tree decode gave, which CheckCodecEncode in package rotinitest checks; a
+// value a write adds may come back as the format reads it (an INI decoder that reads every
+// value as a string reads 3 back as "3"), and is read like any other value of the file.
+//
+//	var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"), rotini.CodecEncode(encodeINI))
+func CodecEncode(encode func(doc any) ([]byte, error)) CodecOption {
+	return func(c *codecEntry) { c.encode = encode }
+}
+
+// validCodecName reports whether name matches ^[a-z][a-z0-9-]*$.
+func validCodecName(name string) bool {
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// authorCodec is a [Codec] format as recon reads it.
+type authorCodec struct {
+	name   string
+	exts   []string
+	decode func([]byte) (any, error)
+	encode func(any) ([]byte, error) // nil: read-only
+}
+
+func (c *authorCodec) Name() string         { return c.name }
+func (c *authorCodec) Extensions() []string { return c.exts }
+
+// Decode decodes a document whose top level must be a mapping; an empty or null document is
+// the empty mapping.
+func (c *authorCodec) Decode(data []byte) (map[string]any, error) {
+	v, err := c.decode(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s: %w", c.name, err)
+	}
+	switch m := v.(type) {
+	case nil:
+		return map[string]any{}, nil
+	case map[string]any:
+		return m, nil
+	}
+	return nil, fmt.Errorf("%w: %s root must be a mapping, got %T", recon.ErrUnsupportedFormat, c.name, v)
+}
+
+// Encode encodes with the [CodecEncode] encoder, and refuses without one.
+func (c *authorCodec) Encode(m map[string]any) ([]byte, error) {
+	if c.encode == nil {
+		return nil, fmt.Errorf("rotini: the %s format is read-only", c.name)
+	}
+	data, err := c.encode(m)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s: %w", c.name, err)
+	}
+	return data, nil
 }
 
 // codecCtor is the constructor that wires the codec of a known format, "" for any other.
@@ -145,28 +301,33 @@ func extensionFormat(ext string) string {
 	return ""
 }
 
-// missingCodec is the error for a document in a known format whose codec is not wired;
-// subject says what reads it.
+// missingCodec is the error for a document in format whose codec is not wired; subject says
+// what reads it. A format rotini doesn't ship is the program's to add with [Codec].
 func missingCodec(format, subject string) *WiringError {
-	return missingFeature("codec:"+format, codecCtor(format), subject)
+	if ctor := codecCtor(format); ctor != "" {
+		return missingFeature("codec:"+format, ctor, subject)
+	}
+	return &WiringError{
+		Feature: "codec:" + format,
+		Msg: fmt.Sprintf("%s, but the program does not wire codec:%s; %s is not a format rotini ships, "+
+			"so add rotini.Codec(%q, …) to the program's features (Program.WithFeatures)", subject, format, format, format),
+	}
 }
 
 // codecFor is the wired codec a configuration file decodes with: its declared format, else
-// the one its extension names. It is nil, with no error, for a format no codec is known by,
-// which recon then reports as unsupported, and a [*WiringError] for a known format whose codec
-// the program does not wire.
+// the one its extension names, the codec wired last winning. It is nil, with no error, for an
+// extension no codec is known by, which recon then reports as unsupported, and a
+// [*WiringError] for a declared format, or a built-in format's extension, whose codec the
+// program does not wire.
 func (s *featureSet) codecFor(format, path string) (*codecEntry, error) {
 	if format != "" {
 		if c := s.codec(format); c != nil {
 			return c, nil
 		}
-		if codecCtor(format) != "" {
-			return nil, missingCodec(format, fmt.Sprintf("configuration file %s is %s", path, format))
-		}
-		return nil, nil //nolint:nilnil // an unknown format: recon reports it
+		return nil, missingCodec(format, fmt.Sprintf("configuration file %s is %s", path, format))
 	}
 	ext := strings.ToLower(filepath.Ext(path))
-	for _, c := range s.codecs {
+	for _, c := range slices.Backward(s.codecs) {
 		if slices.Contains(c.codec().Extensions(), ext) {
 			return c, nil
 		}

@@ -36,7 +36,7 @@ func (p *program) exitConstants() []exitConst {
 		}
 		for _, e := range entries {
 			if e.Name != "" {
-				out = append(out, exitConst{name: prefix + "Exit" + toPascalCase(e.Name), code: e.Code, owner: invocation, entry: e.Name})
+				out = append(out, exitConst{name: prefix + "Exit" + constCase(toPascalCase(e.Name)), code: e.Code, owner: invocation, entry: e.Name})
 			}
 		}
 	}
@@ -82,9 +82,9 @@ func contractDecl(doc []byte) string {
 }
 
 // generatedNames says what spec entry a generated top-level name comes from, for a collision
-// message: each exit constant, the Usage function, Contract and ToolsMCP.
+// message: each exit constant, the Usage function, Examples, Contract and ToolsMCP.
 func generatedNames(consts []exitConst, contract, tools bool) map[string]string {
-	out := map[string]string{"Usage": "the generated Usage function"}
+	out := map[string]string{"Usage": "the generated Usage function", "Examples": "the generated Examples variable, which lists the spec's examples"}
 	for _, c := range consts {
 		out[c.name] = fmt.Sprintf("the exit_status name %q of %q", c.entry, c.owner)
 	}

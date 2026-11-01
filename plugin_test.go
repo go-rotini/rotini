@@ -245,9 +245,9 @@ func TestRun_pluginStartFailedIsInternal(t *testing.T) {
 	}
 }
 
-// TestPluginBinary pins that Command.PluginBinary resolves declared plugins, aliases and
+// TestLookPlugin pins that Command.LookPlugin resolves declared plugins, aliases and
 // discovered tokens through the same plugin path dispatch uses.
-func TestPluginBinary(t *testing.T) {
+func TestLookPlugin(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string) string {
 		p := filepath.Join(dir, progFile(name))
@@ -270,7 +270,7 @@ func TestPluginBinary(t *testing.T) {
 	}
 
 	t.Run("a declared plugin sees the plugin path", func(t *testing.T) {
-		p, ok := cmd.PluginBinary("found")
+		p, ok := cmd.LookPlugin("found")
 		if !ok {
 			t.Fatal("app-found is in the plugin path and did not resolve")
 		}
@@ -279,7 +279,7 @@ func TestPluginBinary(t *testing.T) {
 		}
 	})
 	t.Run("a discovered token sees the same directory", func(t *testing.T) {
-		p, ok := cmd.PluginBinary("only")
+		p, ok := cmd.LookPlugin("only")
 		if !ok {
 			t.Fatal("app-only is in the plugin path and did not resolve")
 		}
@@ -290,28 +290,34 @@ func TestPluginBinary(t *testing.T) {
 	t.Run("with no plugin path, neither kind sees it", func(t *testing.T) {
 		bare := cmd
 		bare.PluginPath = ""
-		if p, ok := bare.PluginBinary("found"); ok {
+		if p, ok := bare.LookPlugin("found"); ok {
 			t.Errorf("declared plugin resolved to %q with no PluginPath set", p)
 		}
-		if p, ok := bare.PluginBinary("only"); ok {
+		if p, ok := bare.LookPlugin("only"); ok {
 			t.Errorf("discovered token resolved to %q with no PluginPath set", p)
 		}
 	})
 	t.Run("a declared plugin with no binary anywhere", func(t *testing.T) {
-		if _, ok := cmd.PluginBinary("gone"); ok {
+		if _, ok := cmd.LookPlugin("gone"); ok {
 			t.Error("a plugin with no binary reported as resolvable")
 		}
 	})
 	t.Run("an unknown name with no discovery", func(t *testing.T) {
-		if _, ok := (Command{Name: "app"}).PluginBinary("whatever"); ok {
+		if _, ok := (Command{Name: "app"}).LookPlugin("whatever"); ok {
 			t.Error("a command with no plugins and no discovery resolved something")
 		}
 	})
 	t.Run("an alias answers identically to its plugin", func(t *testing.T) {
-		byName, okName := cmd.PluginBinary("found")
-		byAlias, okAlias := cmd.PluginBinary("f")
+		byName, okName := cmd.LookPlugin("found")
+		byAlias, okAlias := cmd.LookPlugin("f")
 		if byName != byAlias || okName != okAlias {
 			t.Errorf("alias gave (%q, %t), name gave (%q, %t)", byAlias, okAlias, byName, okName)
+		}
+	})
+	t.Run("the deprecated PluginBinary forwards", func(t *testing.T) {
+		want, wantOK := cmd.LookPlugin("found")
+		if got, ok := cmd.PluginBinary("found"); got != want || ok != wantOK {
+			t.Errorf("PluginBinary = (%q, %t), want (%q, %t)", got, ok, want, wantOK)
 		}
 	})
 }
@@ -355,7 +361,7 @@ func TestRun_discoveryIgnoresCaseVariantsOfDeclaredNames(t *testing.T) {
 			if _, err := os.Stat(marker); err == nil {
 				t.Fatal("a case variant of a declared name ran a discovered binary")
 			}
-			if p, ok := rootFrame(def).PluginBinary(w); ok {
+			if p, ok := rootFrame(def).LookPlugin(w); ok {
 				t.Errorf("PluginBinary(%q) = %q, want no plugin", w, p)
 			}
 		})
@@ -421,7 +427,7 @@ func TestRun_pluginHonorsProgramStdin(t *testing.T) {
 
 func TestPluginErrorKind_String(t *testing.T) {
 	seen := map[string]bool{}
-	for _, k := range []PluginErrorKind{PluginNotFound, PluginTimeout, PluginStartFailed} {
+	for _, k := range []PluginErrorKind{PluginErrorKindUnspecified, PluginNotFound, PluginTimeout, PluginStartFailed} {
 		s := k.String()
 		if s == "" {
 			t.Errorf("kind %d renders empty", k)
@@ -503,7 +509,7 @@ func TestRun_discoveryTokenTraversal(t *testing.T) {
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("a token with ../ ran a file outside the plugin path")
 	}
-	if _, ok := rootFrame(def).PluginBinary("x/../../outside/evil"); ok {
+	if _, ok := rootFrame(def).LookPlugin("x/../../outside/evil"); ok {
 		t.Error("PluginBinary resolved a token with ../")
 	}
 }
@@ -526,5 +532,24 @@ func TestPlugin_hostFlagCheckRedactsSecretWord(t *testing.T) {
 	}
 	if want := "--token can't come before plugin [redacted]"; !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+// TestPluginDispatch_searchPath pins that PluginPath wins over the deprecated Dir, and that a
+// dispatch built with Dir alone still searches it.
+func TestPluginDispatch_searchPath(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		d    PluginDispatch
+		want string
+	}{
+		{PluginDispatch{}, ""},
+		{PluginDispatch{Dir: "/old"}, "/old"},
+		{PluginDispatch{PluginPath: "/new"}, "/new"},
+		{PluginDispatch{PluginPath: "/new", Dir: "/old"}, "/new"},
+	} {
+		if got := c.d.searchPath(); got != c.want {
+			t.Errorf("%+v searches %q, want %q", c.d, got, c.want)
+		}
 	}
 }

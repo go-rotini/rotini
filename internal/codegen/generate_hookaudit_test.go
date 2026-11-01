@@ -74,6 +74,34 @@ func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
+// TestHookAudit_errorShapeNamesTheENoOp pins that a misspelled hook on a HandlerE names
+// the No*E embed that supplies the hook, since the plain No* one is not in an error stub.
+func TestHookAudit_errorShapeNamesTheENoOp(t *testing.T) {
+	cmdDir, gen := hookAuditFixture(t)
+	if err := os.WriteFile(filepath.Join(cmdDir, "demo_build.go"), []byte(`package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*demoBuildHandler)(nil)
+
+type demoBuildHandler struct{ rotini.NoHooksE }
+
+func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) error { return nil }
+
+func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) error { return nil }
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notices := gen(t)
+	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "rotini.NoPreRunE is what supplies PreRun") {
+		t.Fatalf("notices = %v, want one naming rotini.NoPreRunE", notices)
+	}
+}
+
 // TestHookAudit_isQuietOnCorrectCode pins silence for correctly spelled hooks and ordinary
 // helper methods.
 func TestHookAudit_isQuietOnCorrectCode(t *testing.T) {

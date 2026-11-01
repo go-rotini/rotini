@@ -1,11 +1,18 @@
+field CodecDocuments.DuplicateKey []byte
+field CodecDocuments.Null []byte
+field CodecDocuments.TwoDocuments []byte
+field CodecDocuments.Valid [][]byte
 field Result.Argv []string
 field Result.Code int
 field Result.Dir string
 field Result.Env []string
 field Result.Err error
+field Result.Outcome rotini.Outcome
 field Result.Stderr []byte
 field Result.Stdout []byte
 func Argv0(name string) Option
+func CheckCodec(tb testing.TB, decode func(data []byte) (any, error), docs CodecDocuments)
+func CheckCodecEncode(tb testing.TB, decode func(data []byte) (any, error), encode func(doc any) ([]byte, error), docs CodecDocuments)
 func Clock(now time.Time) Option
 func Context(ctx context.Context) Option
 func Dir(dir string) Option
@@ -15,8 +22,10 @@ func OutputAs[T any](tb testing.TB, res Result, format string) T
 func Output[T any](tb testing.TB, res Result) T
 func Path(names ...string) Option
 func Presence(set rotini.Presence) Option
+func RunArgv(tb testing.TB, p *rotini.Program, argv []string, opts ...Option) Result
 func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result
 func Secrets() Option
 func Stdin(r io.Reader) Option
+type CodecDocuments struct
 type Option func(*config)
 type Result struct

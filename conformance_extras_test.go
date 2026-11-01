@@ -37,7 +37,7 @@ type acShipInputs struct {
 	}
 }
 
-func readShip(t *testing.T, env []string, files []ConfigFile, argv ...string) (acShipInputs, error) {
+func readShip(t *testing.T, env []string, files []ConfigFileDef, argv ...string) (acShipInputs, error) {
 	t.Helper()
 	var in acShipInputs
 	rtx := NewContextFor(acShipDef(), argv).WithEnviron(env)
@@ -63,7 +63,7 @@ func confArgumentConfigFallback(t *testing.T, _ *Context, _ InputSettings) {
 	if err := os.WriteFile(path, []byte("env: staging\nservice: web\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	files := []ConfigFile{{Name: "ship", Path: path, Format: "yaml"}}
+	files := []ConfigFileDef{{Name: "ship", Path: path, Format: "yaml"}}
 	in, err := readShip(t, []string{"SHIP_SERVICE=db"}, files)
 	if err != nil || in.Ship.Arguments.Env != "staging" || in.Ship.Arguments.Service != "db" {
 		t.Errorf("config and env: %+v, %v", in.Ship.Arguments, err)
@@ -248,7 +248,7 @@ func confPrefixedBase(t *testing.T, _ *Context, _ InputSettings) {
 	read := func(argv ...string) (inputs, error) {
 		var in inputs
 		rtx := NewContextFor(def, argv).WithEnviron([]string{"MASK=0xFF", "PORT=010"})
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	in, err := read("--n", "-0x1_0", "--raw", "010")
 	if err != nil {

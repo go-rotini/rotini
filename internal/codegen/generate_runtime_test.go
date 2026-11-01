@@ -89,13 +89,13 @@ func TestDefinitionLiteral_usage(t *testing.T) {
 // The generated Usage function answers for every command, hidden ones and aliases included.
 func TestUsageFuncDecl(t *testing.T) {
 	t.Parallel()
-	src := usageFuncDecl(runtimeLaneProgram(t, runtimeLaneSpec))
+	src := usageFuncDecl(runtimeLaneProgram(t, runtimeLaneSpec), "definition")
 	for _, want := range []string{
 		"case \"\":\n\t\treturn \"bb tool [flags] <command>\", nil",
 		"switch rotiniCanonicalPath(path) {",
 		"case \"ls\":\n\t\treturn \"bb tool ls [path]\", nil",
 		"case \"admin purge\":\n\t\treturn \"bb tool admin purge\", nil",
-		`return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))`,
+		`return "", rotini.UnknownCommandError(definition, path...)`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("Usage function lacks %q\n%s", want, src)
@@ -160,7 +160,7 @@ command:
     - name: sub
       multicall: true
 `)
-	problems := lintMulticall(spec)
+	problems := lintDocLevelKeys(spec) // the rule that keeps every root-only key on the root
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "root-command-level key") {
 		t.Errorf("problems = %v", problems)
 	}

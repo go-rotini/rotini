@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -60,7 +61,13 @@ func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	switch elem {
 	case "time.Time":
 		parse = func(v string) (string, error) {
-			t, err := parseTimeValue(v, ts)
+			var t time.Time
+			var err error
+			if ts.plain() {
+				t, err = time.Parse(time.RFC3339, strings.TrimSpace(v))
+			} else {
+				t, err = parseTime(v, ts)
+			}
 			return t.UTC().Format(time.RFC3339Nano), err
 		}
 	case "rotini.ByteSize":

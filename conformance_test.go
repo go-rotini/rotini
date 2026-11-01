@@ -200,9 +200,9 @@ func acmeDef() Definition {
 // project config (CFG-03), and an xdg user config (CFG-02), in that
 // precedence order.
 func acmeMeta(dir string) InputSettings {
-	return InputSettings{ConfigFiles: []ConfigFile{
+	return InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "main", Path: filepath.Join(dir, "acme.yaml"), Format: "yaml",
-			PathFrom: &PathFromDef{Flag: "config", Env: "ACME_CONFIG"}},
+			PathFrom: &PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}},
 		{Name: "project", Format: "yaml",
 			Discover: &DiscoverDef{Strategy: "walk-up", File: ".acme.yaml"}},
 		{Name: "user", Format: "yaml",
@@ -718,8 +718,8 @@ func conformanceCases() []inputCase {
 				// format passthrough as yaml/json/toml. jsonc keeps dotted keys,
 				// so the ordinary flag fallback reads it…
 				meta.ConfigFiles = append(meta.ConfigFiles,
-					ConfigFile{Name: "extra-jsonc", Path: "../app.jsonc", Format: "jsonc"},
-					ConfigFile{Name: "extra-env", Path: "../app.env", Format: "dotenv"},
+					ConfigFileDef{Name: "extra-jsonc", Path: "../app.jsonc", Format: "jsonc"},
+					ConfigFileDef{Name: "extra-env", Path: "../app.env", Format: "dotenv"},
 				)
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-jsonc" {
 					t.Errorf("output = %q, want from-jsonc through the declared-format jsonc entry", in.Deploy.Flags.Output)
@@ -835,7 +835,7 @@ func conformanceCases() []inputCase {
 				// history beneath it.
 				rtx.WithInputSettings(acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := rtx.DefaultInputs[acDeployInputs]()
-				files, _ := rtx.FileInputs[acDeployInputs]()
+				files, _ := rtx.ConfigInputs[acDeployInputs]()
 				env, _ := rtx.EnvInputs[acDeployInputs]()
 				argv, _ := rtx.ArgvInputs[acDeployInputs]()
 				_, rep := MergeInputsWithReport(defaults, files, env, argv)
@@ -847,7 +847,7 @@ func conformanceCases() []inputCase {
 				for _, p := range rep.History("Deploy.Flags.Env") {
 					layers = append(layers, p.Layer)
 				}
-				if want := []string{"defaults", "files", "env", "argv"}; !reflect.DeepEqual(layers, want) {
+				if want := []string{"default", "config", "env", "argv"}; !reflect.DeepEqual(layers, want) {
 					t.Errorf("history = %v, want %v", layers, want)
 				}
 			}},
@@ -1121,7 +1121,7 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "FILE-03", args: []string{"deploy"},
 			check: func(t *testing.T, _ *Context, _ InputSettings) {
-				// "-" as an outputfile is stdout; an existing file is kept without Overwrite.
+				// "-" as an outputfile is stdout; an existing file is kept without OutputOverwrite.
 				fileOutput(t)
 			}},
 
@@ -1217,7 +1217,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
 		"FLAG-27", "FLAG-28",
 		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
-		"PREC-07", "FLAG-30",
+		"PREC-07", "FLAG-30", "CMD-01",
+		"KIND-01", "KIND-02", "KIND-03", "KIND-04", "KIND-05", "KIND-06", "KIND-07", "KIND-08",
+		"KIND-09", "KIND-10",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
@@ -1245,6 +1247,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		seen[c.id]++
 	}
 	for _, c := range argvConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range kindConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

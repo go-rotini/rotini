@@ -164,23 +164,23 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	c := Constraints{MaxLength: new(3), Pattern: "^a", MaxItems: new(5)}
 	vals := []string{"abc", "bcd", "abcdef"}
 	full := newFeatureSet([]Feature{Bounds(), Patterns()})
-	want := checkConstraints(allFeatures(), "--s", "[]string", "", c, vals, false, "")
+	want := checkConstraints(allFeatures(), "--s", "[]string", "", c, vals, false, nil)
 	if want == nil || !strings.Contains(want.Error(), "must match ^a") {
 		t.Fatalf("legacy = %v, want the pattern error on the second value", want)
 	}
-	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); errText(got) != errText(want) {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, nil); errText(got) != errText(want) {
 		t.Errorf("wired = %v, want %v", got, want)
 	}
 	vals = []string{"abcdef", "bcd"}
-	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); got == nil || !strings.Contains(got.Error(), "at most 3") {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, nil); got == nil || !strings.Contains(got.Error(), "at most 3") {
 		t.Errorf("length before pattern: got %v", got)
 	}
 
-	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", "", Constraints{MinItems: 1}, nil, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", "", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--s", "string", "", Constraints{Pattern: "x"}, []string{"x"}, false, ""), "patterns", "Patterns()")
-	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", "", Constraints{}, []string{"-"}, false, ""), "stream-paths", "StreamPaths()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", "", Constraints{MinItems: 1}, nil, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", "", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "string", "", Constraints{Pattern: "x"}, []string{"x"}, false, nil), "patterns", "Patterns()")
+	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", "", Constraints{}, []string{"-"}, false, nil), "stream-paths", "StreamPaths()")
 
 	// A constraint that checks nothing for its type, or no value to check, needs no feature.
 	for _, tt := range []struct {
@@ -195,7 +195,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 		{"string", Constraints{MinItems: 1}, []string{"x"}},
 		{"[]string", Constraints{UniqueItems: true}, []string{"x", "x"}},
 	} {
-		if err := checkConstraints(noFeatures, "--x", tt.typ, "", tt.c, tt.vals, false, ""); err != nil {
+		if err := checkConstraints(noFeatures, "--x", tt.typ, "", tt.c, tt.vals, false, nil); err != nil {
 			t.Errorf("%s %+v: %v, want nothing to check", tt.typ, tt.c, err)
 		}
 	}
@@ -204,7 +204,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "f"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkConstraints(noFeatures, "--f", "existingfile", "", Constraints{}, []string{"f", "missing"}, false, dir); err == nil || !strings.Contains(err.Error(), "no such file") {
+	if err := checkConstraints(noFeatures, "--f", "existingfile", "", Constraints{}, []string{"f", "missing"}, false, dirView(dir)); err == nil || !strings.Contains(err.Error(), "no such file") {
 		t.Errorf("existingfile stays core: %v", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestUniqueItems_ownFeature(t *testing.T) {
 	if err := checkUnique(unique, "--tags", []string{"1", "01"}, "[]int", timeSpec{}, enumSet{}, false); err == nil || !strings.Contains(err.Error(), "must not repeat") {
 		t.Errorf("wired unique: %v", err)
 	}
-	wantMissing(t, checkConstraints(unique, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(unique, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, nil), "bounds", "Bounds()")
 
 	def := objDef()
 	def.Flags[1].UniqueItems = true
@@ -343,5 +343,84 @@ func TestMeasuredFor(t *testing.T) {
 		if measuredFor(typ) != nil {
 			t.Errorf("%q is measured", typ)
 		}
+	}
+}
+
+// TestTimeValues_ownFeature pins that a time input with a layout or relative form reads only
+// with TimeValues wired, and that a plain RFC 3339 time needs no feature.
+func TestTimeValues_ownFeature(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "day", Identifiers: []string{"--day"}, Type: "time.Time", Layout: layoutDate},
+		{Name: "since", Identifiers: []string{"--since"}, Type: "time.Time", Relative: relativePast},
+		{Name: "at", Identifiers: []string{"--at"}, Type: "time.Time"},
+	}}
+	type in struct {
+		App struct {
+			Flags struct {
+				Day   time.Time `rotini:"day"`
+				Since time.Time `rotini:"since"`
+				At    time.Time `rotini:"at"`
+			}
+			Arguments struct{}
+		}
+	}
+	parse := func(argv []string, fs ...Feature) (in, error) {
+		var out in
+		err := NewParser().Parse(wired(NewContextFor(def, argv), fs...), &out)
+		return out, err
+	}
+	if got, err := parse([]string{"--at", "2026-09-29T14:00:00Z"}); err != nil || got.App.Flags.At.Hour() != 14 {
+		t.Errorf("plain time with no features: %v, %v", got.App.Flags.At, err)
+	}
+	for _, argv := range [][]string{{"--day", "2026-09-29"}, {"--since", "2h"}} {
+		_, err := parse(argv)
+		wantMissing(t, err, "values:time", "TimeValues()")
+		if want := "input " + argv[0] + " is a date or time with a layout or relative form, but the program does not wire values:time"; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("message %q, want prefix %q", err, want)
+		}
+	}
+	got, err := parse([]string{"--day", "2026-09-29", "--since", "2h"}, TimeValues())
+	if err != nil || got.App.Flags.Day.Day() != 29 || got.App.Flags.Since.IsZero() {
+		t.Errorf("wired TimeValues: %+v, %v", got.App.Flags, err)
+	}
+	if !isTimeField(reflect.TypeFor[map[string]*time.Time]()) || !isTimeField(reflect.TypeFor[[]time.Time]()) || isTimeField(reflect.TypeFor[int]()) {
+		t.Error("isTimeField misjudges a field type")
+	}
+	if _, err := parseTime("2026-09-29", timeSpec{layout: layoutDate}); !errors.As(err, new(*WiringError)) {
+		t.Errorf("parseTime unwired: %v, want a *WiringError", err)
+	}
+	if d, err := parseTime("2026-09-29", timeSpec{layout: layoutDate, clock: featureClock(newFeatureSet([]Feature{TimeValues()}))}); err != nil || d.Day() != 29 {
+		t.Errorf("parseTime wired: %v, %v", d, err)
+	}
+	// A plain time compares as the instant it names, with no feature wired.
+	key := uniqueKeyFor("[]time.Time", timeSpec{}, enumSet{})
+	if a, b := key("2026-09-29T14:00:00+02:00"), key("2026-09-29T12:00:00Z"); a != b {
+		t.Errorf("plain time keys %q and %q differ", a, b)
+	}
+}
+
+// TestNestedEnv_values pins what a wired NestedEnv reads and that time channel inputs read
+// their layouts with TimeValues.
+func TestNestedEnv_values(t *testing.T) {
+	t.Setenv("WR_LABELS__TEAM", "core")
+	t.Setenv("WR_LABELS__ON__CALL", "ada")
+	t.Setenv("WR_SINCE", "2026-01-02")
+	var fam wrEnvFamily
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), NestedEnv()), &fam); err != nil {
+		t.Fatal(err)
+	}
+	if l := fam.App.Env.Labels; l["team"] != "core" || l["on"].(map[string]any)["call"] != "ada" {
+		t.Errorf("labels = %v", l)
+	}
+	var tm wrEnvTime
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), TimeValues()), &tm); err != nil {
+		t.Fatal(err)
+	}
+	if s := tm.App.Env.Since; s.Year() != 2026 || s.Day() != 2 {
+		t.Errorf("since = %v", s)
+	}
+	var none wrEnvOnly
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env()), &none); err != nil {
+		t.Errorf("env without families or times needs neither: %v", err)
 	}
 }

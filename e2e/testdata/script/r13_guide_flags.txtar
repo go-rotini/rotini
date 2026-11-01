@@ -204,6 +204,7 @@ generate:
       file: cmd/todo/main.go
     - type: cmd
       file: internal/cmd/todo/zz_rotini.go
+      hook_returns: error
   features:
     - type: help
       enabled: true
@@ -226,17 +227,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoEchoHandler)(nil)
+var _ rotini.HandlerE = (*todoEchoHandler)(nil)
 
-type todoEchoHandler struct{ rotini.NoHooks }
+type todoEchoHandler struct{ rotini.NoHooksE }
 
-func (*todoEchoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoEchoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoEchoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintf(rtx.Stdout, "argv=%q words=%q\n", rtx.Argv, in.TodoEcho.Arguments.Words)
+	return nil
 }
 -- todo.go.txt --
 package todo
@@ -248,15 +249,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoHandler)(nil)
+var _ rotini.HandlerE = (*todoHandler)(nil)
 
 type todoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	for _, d := range rotini.Deprecations(rtx) {
 		if d.ReplacedBy != "" {
 			rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
@@ -267,27 +268,27 @@ func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 
 	argv, err := rtx.ArgvInputs[TodoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if argv.Values.Todo.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 		fmt.Fprintln(rtx.Stdout, page)
 		rtx.HaltWithCode(0)
 	}
+
+	return nil
 }
 
-func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if _, err := rtx.Inputs[TodoInputs](); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- spec.yaml --
 $schema: ./.rotini-schema.spec.json

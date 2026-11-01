@@ -56,7 +56,7 @@ to a different major version.
 - **No injected flags.** There are no implicit `--help`, `--version` or `--color` flags; declare
   the ones you want in the spec.
 - **No "did you mean" suggestions by default.** A `ParseError` carries the rejected token and
-  its candidates, and a program can rank them with `Suggestor` if its author chooses to.
+  its candidates, and a program can rank them with `Suggester` if its author chooses to.
 
 The runtime has two built-in behaviors: it handles Ctrl+C and SIGTERM so the program shuts down
 cleanly (turn this off with `WithoutSignalHandling`), and it answers a hidden `__complete`

@@ -219,28 +219,44 @@ func (p *Processor) explainDecodeFailure(kind string, err error) error {
 	return errors.Join(problems...)
 }
 
-// validateAndLintSpec validates and lints the spec and every local spec it composes.
-func (p *Processor) validateAndLintSpec(rs *reconciledSpec) []error {
-	problems := p.validateAndLintOne(rs)
-	problems = append(problems, p.validateComposedSpecs(rs, map[string]bool{})...)
+// validateAndLintSpec validates and lints the spec and every local spec it composes. With
+// collect, a document whose only schema problems are unknown keys is linted too.
+func (p *Processor) validateAndLintSpec(rs *reconciledSpec, collect bool) []error {
+	problems := p.validateAndLintOne(rs, collect)
+	problems = append(problems, p.validateComposedSpecs(rs, map[string]bool{}, collect)...)
 	if errs, _ := splitProblems(problems); len(errs) > 0 {
 		return problems // a spec that doesn't validate isn't linted
 	}
 	return append(problems, lintComposedShadowing(rs)...)
 }
 
-// validateAndLintOne validates one spec document and, only if it is schema-valid, lints it.
-func (p *Processor) validateAndLintOne(rs *reconciledSpec) []error {
+// validateAndLintOne validates one spec document and, only if it is schema-valid, lints it;
+// with collect, also when its only schema problems are unknown keys.
+func (p *Processor) validateAndLintOne(rs *reconciledSpec, collect bool) []error {
 	if problems := p.validateSpec(rs); len(problems) > 0 {
-		return problems
+		if !collect || !onlyUnknownKeys(problems) {
+			return problems
+		}
+		return append(problems, p.lintSpec(rs)...)
 	}
 	return p.lintSpec(rs)
+}
+
+// onlyUnknownKeys reports whether every problem is a schema problem about an unknown key.
+func onlyUnknownKeys(problems []error) bool {
+	for _, e := range problems {
+		var pr *problem
+		if !errors.As(e, &pr) || !pr.unknownKey {
+			return false
+		}
+	}
+	return true
 }
 
 // validateComposedSpecs transitively validates and lints every local spec rs composes via
 // `$ref`, positioning problems in each child's file. mod:// and remote refs are skipped, as is
 // a child that fails to read (composition reports it at the $ref).
-func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bool) []error {
+func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bool, collect bool) []error {
 	if rs == nil || rs.spec == nil {
 		return nil
 	}
@@ -261,9 +277,9 @@ func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bo
 			}
 			continue
 		}
-		problems = append(problems, p.validateAndLintOne(child)...)
+		problems = append(problems, p.validateAndLintOne(child, collect)...)
 		problems = append(problems, composedTopicsProblem(rs, child)...)
-		problems = append(problems, p.validateComposedSpecs(child, seen)...)
+		problems = append(problems, p.validateComposedSpecs(child, seen, collect)...)
 	}
 	return problems
 }
@@ -292,9 +308,12 @@ func displayPath(abs string) string {
 }
 
 // validateAndLintConf is validateAndLintSpec for the conf.
-func (p *Processor) validateAndLintConf(rc *reconciledConf) []error {
+func (p *Processor) validateAndLintConf(rc *reconciledConf, collect bool) []error {
 	if problems := p.validateConf(rc); len(problems) > 0 {
-		return problems
+		if !collect || !onlyUnknownKeys(problems) {
+			return problems
+		}
+		return append(problems, p.lintConf(rc)...)
 	}
 	return p.lintConf(rc)
 }
@@ -305,13 +324,13 @@ func (p *Processor) validateAndLintConf(rc *reconciledConf) []error {
 func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, failMode string) (warnings []error, err error) {
 	fast := failFast(failMode, rc)
 
-	specErrs, specWarns := splitProblems(p.validateAndLintSpec(rs))
+	specErrs, specWarns := splitProblems(p.validateAndLintSpec(rs, !fast))
 	warnings = append(warnings, specWarns...)
 	if fast && len(specErrs) > 0 {
 		return warnings, specErrs[0]
 	}
 
-	confErrs, confWarns := splitProblems(p.validateAndLintConf(rc))
+	confErrs, confWarns := splitProblems(p.validateAndLintConf(rc, !fast))
 	warnings = append(warnings, confWarns...)
 	if fast && len(confErrs) > 0 {
 		return warnings, confErrs[0]
@@ -357,9 +376,28 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	for _, name := range prog.restored {
 		notices = append(notices, fmt.Errorf("restored %s; its command is back in the spec", name))
 	}
-	notices = append(notices, prog.auditWarnings...)
+	notices = append(notices, withoutReported(prog.auditWarnings, warnings)...)
 	notices = append(notices, prog.agentNotices...)
 	return notices, err
+}
+
+// withoutReported returns the generate notices that no validation warning already reports:
+// a finding both make (two enum values that would get one constant) is shown once, with the
+// validation warning's position.
+func withoutReported(notices, warnings []error) []error {
+	reported := map[string]bool{}
+	for _, w := range warnings {
+		if pr := (*problem)(nil); errors.As(w, &pr) {
+			reported[pr.msg] = true
+		}
+	}
+	out := make([]error, 0, len(notices))
+	for _, n := range notices {
+		if !reported[n.Error()] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // failFast reports whether validation stops at the first problem: failMode if set, else the

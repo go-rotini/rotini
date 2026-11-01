@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -542,8 +541,7 @@ func (cc *completionContext) mark(idx int, fd *FlagDef, value string) {
 	}
 	cc.set[idx][fd.Name] = true
 	if fd.ShortCircuit {
-		on, err := strconv.ParseBool(value)
-		cc.shortCircuit = cc.shortCircuit || fd.Type != "bool" || (err == nil && on)
+		cc.shortCircuit = cc.shortCircuit || fd.Type != "bool" || boolSetTrue(value)
 	}
 }
 
@@ -712,7 +710,7 @@ func dynamicArgValues(lookup HandlerLookup, rtx *Context, chain []Command, words
 }
 
 // resolveHandler resolves handlerName through the program's lookup — the same one dispatch
-// uses — and reports whether the handler implements T.
+// uses — and reports whether the handler implements T, looking inside a [FromHandlerE] wrapper.
 func resolveHandler[T any](lookup HandlerLookup, handlerName string) (T, bool) {
 	var zero T
 	if lookup == nil || handlerName == "" {
@@ -721,6 +719,10 @@ func resolveHandler[T any](lookup HandlerLookup, handlerName string) (T, bool) {
 	h, ok := lookup(handlerName)
 	if !ok {
 		return zero, false
+	}
+	if eh, wrapped := h.(handlerE); wrapped { // a FromHandlerE wrapper: ask the handler inside
+		completer, ok := any(eh.h).(T)
+		return completer, ok
 	}
 	completer, ok := any(h).(T)
 	return completer, ok
@@ -733,7 +735,7 @@ func seedCompletionContext(rtx *Context, chain []Command, words []string, idx in
 	if rtx == nil {
 		return func() {}
 	}
-	markInvoked(chain)
+	finishChain(chain)
 	rtx.mu.Lock()
 	rtx.chain = chain
 	rtx.Argv = words
@@ -911,7 +913,7 @@ func wireSafeValue(value string) bool {
 // doesn't know, and the kind line stays the last line.
 const completionDirectivePrefix = ":rotini:"
 
-// completeKindCommand is the [Completion] kind for a help command's command path.
+// completeKindCommand is the [CompletionHint] kind for a help command's command path.
 const completeKindCommand = "command"
 
 // impliedNone is the hint for a word nothing else can fill: no argument is left to take it, or
@@ -922,7 +924,7 @@ const impliedNone = "\x00none"
 
 // resolveImplied turns an impliedNone hint into what the shell is told, given whether there
 // are candidates.
-func resolveImplied(h Completion, candidates bool) Completion {
+func resolveImplied(h CompletionHint, candidates bool) CompletionHint {
 	if h.Kind != impliedNone {
 		return h
 	}
@@ -954,16 +956,16 @@ func completionHint(def Definition, words []string) string {
 }
 
 // completionHintFor returns the declared hint for the word being completed, or the zero
-// Completion when there is none. It is the wire-neutral half of completionHint, handed to
+// CompletionHint when there is none. It is the wire-neutral half of completionHint, handed to
 // every [CompletionFormat].
-func completionHintFor(def Definition, words []string) Completion {
+func completionHintFor(def Definition, words []string) CompletionHint {
 	return resolveImplied(completionHintWith(allFeatures(), def, words), false)
 }
 
 // completionHintWith is completionHintFor with the run's features fs.
-func completionHintWith(fs *featureSet, def Definition, words []string) Completion {
+func completionHintWith(fs *featureSet, def Definition, words []string) CompletionHint {
 	if len(words) == 0 {
-		return Completion{}
+		return CompletionHint{}
 	}
 	if bashGlue(words) {
 		words = append(slices.Clone(words), "")
@@ -972,14 +974,14 @@ func completionHintWith(fs *featureSet, def Definition, words []string) Completi
 
 	cc := walkContext(def, words[:len(words)-1])
 	if cc.plugin {
-		return Completion{} // the plugin binary owns its own argument surface
+		return CompletionHint{} // the plugin binary owns its own argument surface
 	}
 	if cc.shortCircuit {
-		return Completion{Kind: "none"} // offer nothing, not even the shell's file fallback
+		return CompletionHint{Kind: "none"} // offer nothing, not even the shell's file fallback
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough {
-		return Completion{}
+		return CompletionHint{}
 	}
 	if cc.afterTerminator || cc.operands {
 		// Flags have stopped: the word is an argument, whatever it looks like.
@@ -995,7 +997,7 @@ func completionHintWith(fs *featureSet, def Definition, words []string) Completi
 		case takesValue(p.fd):
 			return flagValueHint(p.fd, partial)
 		}
-		return Completion{}
+		return CompletionHint{}
 	}
 
 	// "--flag=<TAB>" and "-fvalue<TAB>": the word carries its own flag.
@@ -1009,17 +1011,17 @@ func completionHintWith(fs *featureSet, def Definition, words []string) Completi
 		if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
 			return argHint(def, cc, ad, partial)
 		}
-		return Completion{Kind: impliedNone}
+		return CompletionHint{Kind: impliedNone}
 	}
 	return positionalHint(def, cc, partial)
 }
 
 // positionalHint is the hint for the argument the word binds to, or none when the command
 // takes no further argument: the run would reject any word there.
-func positionalHint(def Definition, cc completionContext, partial string) Completion {
+func positionalHint(def Definition, cc completionContext, partial string) CompletionHint {
 	ad, ok := positionalAt(cc.chain[len(cc.chain)-1].Arguments, cc.positionals)
 	if !ok {
-		return Completion{Kind: impliedNone}
+		return CompletionHint{Kind: impliedNone}
 	}
 	return argHint(def, cc, ad, partial)
 }
@@ -1027,9 +1029,9 @@ func positionalHint(def Definition, cc completionContext, partial string) Comple
 // argHint is an argument's hint for partial. An "@" on a from:file argument starts a path, so
 // files; a command path that can take no further word offers nothing more; and an enum with
 // no declared hint is the whole vocabulary, so nothing else is offered when no value matches.
-func argHint(def Definition, cc completionContext, ad ArgDef, partial string) Completion {
+func argHint(def Definition, cc completionContext, ad ArgDef, partial string) CompletionHint {
 	if strings.HasPrefix(partial, "@") && slices.Contains(ad.From, "file") {
-		return Completion{Kind: "file"}
+		return CompletionHint{Kind: "file"}
 	}
 	h := ad.Complete
 	switch {
@@ -1046,9 +1048,9 @@ func argHint(def Definition, cc completionContext, ad ArgDef, partial string) Co
 // flagValueHint is a value-taking flag's hint for partial, read as argHint reads an
 // argument's: files after "@" on a from:file flag, and none for an enum, or a map's declared
 // keys, with no declared hint.
-func flagValueHint(fd FlagDef, partial string) Completion {
+func flagValueHint(fd FlagDef, partial string) CompletionHint {
 	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
-		return Completion{Kind: "file"}
+		return CompletionHint{Kind: "file"}
 	}
 	h := fd.Complete
 	if h.Kind == "" && (flagEnum(&fd).declared() || (isMapType(fd.Type) && len(fd.KeyPaths) > 0)) {
@@ -1060,10 +1062,10 @@ func flagValueHint(fd FlagDef, partial string) Completion {
 // inlineValueHint is the hint for a word that starts with "-": the flag's own for
 // "--flag=<TAB>" and a short flag's attached value ("-fvalue<TAB>"), nothing while a flag name
 // is being typed (paths are not candidates).
-func inlineValueHint(chain []Command, partial string) Completion {
+func inlineValueHint(chain []Command, partial string) CompletionHint {
 	fd, _, prefix, val, ok := inlineFlagValue(chain, partial)
 	if !ok {
-		return Completion{}
+		return CompletionHint{}
 	}
 	if isMapType(fd.Type) && strings.Contains(val, "=") {
 		return mapValueHint(fd)
@@ -1162,8 +1164,8 @@ func positionalAt(args []ArgDef, idx int) (ArgDef, bool) {
 	return ArgDef{}, false
 }
 
-// directiveFor renders one Completion as its wire line, or "" for the zero value.
-func directiveFor(c Completion) string {
+// directiveFor renders one CompletionHint as its wire line, or "" for the zero value.
+func directiveFor(c CompletionHint) string {
 	switch c.Kind {
 	case "file":
 		if len(c.Extensions) == 0 {
@@ -1191,10 +1193,10 @@ type CompletionResult struct {
 	// Kind and Extensions. The hint is the fallback for when Candidates is empty, except kind
 	// "none", which also means "never offer files" when there are candidates. Kind "command" is
 	// answered in Candidates, and means "none" to the shell.
-	Hint Completion
+	Hint CompletionHint
 	// Messages are lines for the shell to show, not offer: what completers added with
 	// [Context.AddCompletionMessage], in order, or else, when there are no candidates, the
-	// input's static message ([Completion.Message]). Empty when completion messages are off or
+	// input's static message ([CompletionHint.Message]). Empty when completion messages are off or
 	// switched off at run time.
 	Messages []string
 	// NoSpace asks the shell not to add a space after the inserted candidate: every candidate
@@ -1261,6 +1263,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		words = []string{""}
 	}
 	rtx := p.newRunContext()
+	defer rtx.cleanUpProvided(rtx.RecordError, rtx.recordFault) // a completer may ask for a provided dependency
 	rtx.ctx = ctx
 	// The answer owns stdout: a completer's own writes go to stderr, which the scripts discard.
 	rtx.Stdout, rtx.bufOut = rtx.Stderr, nil
@@ -1547,7 +1550,7 @@ const pluginMessageMarker = "_activeHelp_ "
 // PluginCompletion is the [CompletionFormat] the plugin hosts kubectl, Docker and Flux read: one
 // candidate per line ("value\tdescription" allowed), then a final ":<directive>" line, a number
 // telling the shell what to do next. kubectl reads it from kubectl_complete-<plugin>, and the
-// Docker and Flux CLIs from the plugin's own __complete (see [Program.WithCompletion]).
+// Docker and Flux CLIs from the plugin's own __complete (see [Program.WithCompletionFormat]).
 //
 // The hint maps onto the directives: kind none to 4, offer no file names; kind directory to 16,
 // directory names only; kind file with extensions to 8, file names with those extensions, which
@@ -1588,22 +1591,27 @@ func PluginCompletion(w io.Writer, result CompletionResult) error {
 	return writeLines(w, append(lines, fmt.Sprintf(":%d", directive)))
 }
 
-// WithCompletion sets the [CompletionFormat] the hidden __complete entry answers in, in place
+// WithCompletionFormat sets the [CompletionFormat] the hidden __complete entry answers in, in place
 // of rotini's own. It serves a plugin whose host completes it by calling the plugin's
 // __complete and reading the host's format, as the Docker CLI (`docker-<name> __complete
 // <name> …`) and the Flux CLI (`flux-<name> __complete …`) do with the format
 // [PluginCompletion] writes:
 //
-//	cmd.NewProgram().WithCompletion(rotini.PluginCompletion).Execute()
+//	cmd.NewProgram().WithCompletionFormat(rotini.PluginCompletion).Execute()
 //
 // Rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
 // this unset. A host that runs a separately named completer without a __complete word, such
 // as kubectl's kubectl_complete-<name>, is served by calling [Program.Complete] from main.
 //
 // A nil format restores rotini's own.
-func (p *Program) WithCompletion(format CompletionFormat) *Program {
+func (p *Program) WithCompletionFormat(format CompletionFormat) *Program {
 	p.completion = format
 	return p
+}
+
+// Deprecated: use [Program.WithCompletionFormat].
+func (p *Program) WithCompletion(format CompletionFormat) *Program {
+	return p.WithCompletionFormat(format)
 }
 
 // bashGlue reports whether the word being completed is a bare "=": bash's word break when the
@@ -1615,7 +1623,7 @@ func bashGlue(words []string) bool {
 
 // mapValueHint is the hint for the value after a map entry's "key=": nothing to offer, and no
 // files unless the flag's own hint asks for them.
-func mapValueHint(fd FlagDef) Completion {
+func mapValueHint(fd FlagDef) CompletionHint {
 	h := fd.Complete
 	if h.Kind == "" {
 		h.Kind = "none"

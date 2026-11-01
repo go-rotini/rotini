@@ -22,6 +22,8 @@ import "context"
 //	────────────                                  ───
 //	between one command's own hooks               a field on the handler
 //	between different commands in the chain       rtx.SetDependency(dep, v)
+//	built once per run, on first use              p.WithProvider(dep, fn)
+//	built once for the program, on first use      p.WithSharedProvider(dep, fn)
 //	across every run of the program               p.WithDependency(dep, v)
 //
 // # Hand-written handler sets
@@ -88,4 +90,119 @@ type NoHooks struct {
 	NoPreRun
 	NoPostRun
 	NoCascadingPostRun
+}
+
+// HandlerE is [Handler] with hooks that return an error. A non-nil error is recorded as
+// [Context.RecordError] records it; from CascadingPreRun or PreRun it also stops forward
+// progress, as [Context.HaltWith] does. Teardown still runs, and an error from PostRun or
+// CascadingPostRun does not stop the rest of it.
+//
+//	func (*addHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+//	    inputs, err := rtx.Inputs[AddInputs]()
+//	    if err != nil {
+//	        return err
+//	    }
+//	    return store.Add(inputs.Add.Arguments.Title)
+//	}
+//
+// Returning an error a hook has just recorded with HaltWith or RecordError does not record it
+// twice. A [Middleware] sees the returned error before it is recorded. Everything else is
+// unchanged: [Context.RecordError] records and continues, and
+// [Context.HaltWithCode] sets a code before a `return nil`.
+//
+// A type is one shape or the other, since Go allows only one Run method per type. Wrap an
+// HandlerE with [FromHandlerE] where a Handler is expected; generated wiring does this
+// for stubs that assert HandlerE, and [NewProgram] does it for a method that returns one.
+// Embed the No*E types below to declare only the hooks a command uses.
+type HandlerE interface {
+	// CascadingPreRun runs for every command in the chain, root first, before the invoked
+	// command's PreRun.
+	CascadingPreRun(ctx context.Context, rtx *Context) error
+	// PreRun runs for the invoked command only, before Run.
+	PreRun(ctx context.Context, rtx *Context) error
+	// Run does the invoked command's work.
+	Run(ctx context.Context, rtx *Context) error
+	// PostRun is the invoked command's teardown; it runs when its PreRun began.
+	PostRun(ctx context.Context, rtx *Context) error
+	// CascadingPostRun is each command's teardown, leaf first; it runs when that command's
+	// CascadingPreRun began.
+	CascadingPostRun(ctx context.Context, rtx *Context) error
+}
+
+// NoCascadingPreRunE is an embeddable no-op [HandlerE.CascadingPreRun]. [NoHooksE] embeds
+// all four no-ops at once.
+type NoCascadingPreRunE struct{}
+
+// CascadingPreRun does nothing.
+func (NoCascadingPreRunE) CascadingPreRun(ctx context.Context, rtx *Context) error { return nil }
+
+// NoPreRunE is an embeddable no-op [HandlerE.PreRun]. [NoHooksE] embeds all four no-ops at
+// once.
+type NoPreRunE struct{}
+
+// PreRun does nothing.
+func (NoPreRunE) PreRun(ctx context.Context, rtx *Context) error { return nil }
+
+// NoPostRunE is an embeddable no-op [HandlerE.PostRun]. [NoHooksE] embeds all four no-ops
+// at once.
+type NoPostRunE struct{}
+
+// PostRun does nothing.
+func (NoPostRunE) PostRun(ctx context.Context, rtx *Context) error { return nil }
+
+// NoCascadingPostRunE is an embeddable no-op [HandlerE.CascadingPostRun]. [NoHooksE] embeds
+// all four no-ops at once.
+type NoCascadingPostRunE struct{}
+
+// CascadingPostRun does nothing.
+func (NoCascadingPostRunE) CascadingPostRun(ctx context.Context, rtx *Context) error { return nil }
+
+// NoHooksE is [NoHooks] for an [HandlerE]: the four no-op hooks, leaving Run to the outer
+// type, so a missing or misspelled Run fails the `var _ rotini.HandlerE` assertion.
+type NoHooksE struct {
+	NoCascadingPreRunE
+	NoPreRunE
+	NoPostRunE
+	NoCascadingPostRunE
+}
+
+// FromHandlerE returns h as a [Handler], applying the rules [HandlerE] describes to
+// each returned error. A nil h returns nil.
+//
+// [Program.WithMiddleware]'s middleware sees each returned error, before it is recorded, when
+// the program runs the Handler FromHandlerE returned, as generated wiring does. A Handler that
+// wraps it records the error inside its own hook instead, so the middleware sees nil.
+func FromHandlerE(h HandlerE) Handler {
+	if h == nil {
+		return nil
+	}
+	return handlerE{h}
+}
+
+// handlerE adapts a HandlerE to the Handler the engine runs.
+type handlerE struct{ h HandlerE }
+
+func (a handlerE) CascadingPreRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
+	rtx.returned(a.h.CascadingPreRun(ctx, rtx), true)
+}
+
+func (a handlerE) PreRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
+	rtx.returned(a.h.PreRun(ctx, rtx), true)
+}
+
+func (a handlerE) Run(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
+	rtx.returned(a.h.Run(ctx, rtx), true)
+}
+
+func (a handlerE) PostRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
+	rtx.returned(a.h.PostRun(ctx, rtx), false)
+}
+
+func (a handlerE) CascadingPostRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
+	rtx.returned(a.h.CascadingPostRun(ctx, rtx), false)
 }

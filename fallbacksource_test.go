@@ -82,7 +82,7 @@ func TestFallbackSource_argvValueHasNoSuffixEvenWithEnvSet(t *testing.T) {
 
 func TestFallbackSource_configFile(t *testing.T) {
 	cfg := writeConfig(t, "port: 500\n")
-	err := fsRead(t, fsDef(false), nil, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	err := fsRead(t, fsDef(false), nil, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 	if err == nil || !strings.HasSuffix(err.Error(), "(from configuration file "+cfg+", key port)") {
 		t.Fatalf("Read = %v, want the config file named", err)
 	}
@@ -214,7 +214,7 @@ func fsListDef() Definition {
 
 func fsConfigRead(t *testing.T, cfg string, in any) error {
 	t.Helper()
-	return NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(fsListDef(), nil), in)
+	return NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(fsListDef(), nil), in)
 }
 
 // A null item in a configuration list is refused, by a flag's fallback and by a config input,
@@ -226,7 +226,7 @@ func TestFallbackSource_nullListItem(t *testing.T) {
 	} {
 		cfg := writeConfig(t, body)
 		want = fmt.Sprintf(want, cfg)
-		set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+		set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 		for reader, err := range readerErrors[fsListInputs](NewContextFor(fsListDef(), nil).WithInputSettings(set), "files") {
 			if err == nil || err.Error() != want || !errors.Is(err, ErrUsage) {
 				t.Errorf("%q: %s: %v, want %q", body, reader, err, want)
@@ -285,7 +285,7 @@ func TestFallbackSource_argumentValueErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			set, layer := InputSettings{}, "env"
 			if tt.config != "" {
-				set.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
+				set.ConfigFiles = []ConfigFileDef{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
 				layer = "files"
 			}
 			for _, argv := range [][]string{nil, {"--explain"}} {
@@ -341,7 +341,7 @@ func TestFallbackSource_overriddenBadValueIsNotRead(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			set := InputSettings{}
 			if tt.config != "" {
-				set.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
+				set.ConfigFiles = []ConfigFileDef{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
 			}
 			rtx := NewContextFor(def, tt.argv).WithEnviron(tt.env).WithInputSettings(set)
 			in, err := rtx.Inputs[fsShadowInputs]()

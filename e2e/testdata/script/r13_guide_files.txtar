@@ -119,6 +119,7 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error
   features:
     - type: help
       enabled: true
@@ -144,15 +145,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoCatHandler struct{ rotini.NoHooks }
+type todoCatHandler struct{ rotini.NoHooksE }
 
-func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoCatInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 -- cat_tail.go.txt --
+	return nil
 }
 -- cat.go.txt --
 files := in.TodoCat.Arguments.Files // type: '[]inputfile'
@@ -162,14 +163,12 @@ if len(files) == 0 {
 for _, name := range files {
 	f, err := rotini.OpenInput(rtx, name)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	_, err = io.Copy(rtx.Stdout, f)
 	f.Close()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 }
 -- hash_head.go.txt --
@@ -184,23 +183,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoHashHandler struct{ rotini.NoHooks }
+type todoHashHandler struct{ rotini.NoHooksE }
 
-func (*todoHashHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoHashHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 -- hash.go.txt --
 f, err := rotini.OpenInput(rtx, "-")
 if err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 defer f.Close()
 h := sha256.New()
 if _, err := io.Copy(h, f); err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 if _, err := fmt.Fprintf(rtx.Stdout, "%x\n", h.Sum(nil)); err != nil {
-	rtx.HaltWith(err)
+	return err
 }
 -- export_head.go.txt --
 package todo
@@ -211,22 +208,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoExportHandler struct{ rotini.NoHooks }
+type todoExportHandler struct{ rotini.NoHooksE }
 
-func (*todoExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoExportHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoExportInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
-	rtx.HaltWith(export(rtx, in.TodoExport.Flags.To, in.TodoExport.Flags.Force))
+	return export(rtx, in.TodoExport.Flags.To, in.TodoExport.Flags.Force)
 }
 
 func load() []Task { return []Task{{ID: 1, Title: "write docs", Status: "open"}} }
 
 -- export.go.txt --
 func export(rtx *rotini.Context, path string, force bool) error {
-	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	out, err := rotini.CreateOutput(rtx, path, rotini.OutputOverwrite(force))
 	if err != nil {
 		return err
 	}

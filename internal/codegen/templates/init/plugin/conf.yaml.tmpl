@@ -11,6 +11,7 @@ generate:
       file: cmd/{{.Name}}/main.go
     - type: cmd
       file: internal/cmd/{{.Name}}/zz_rotini.go
+      hook_returns: error
   features:
     - type: help
       enabled: true

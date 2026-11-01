@@ -23,12 +23,16 @@ import (
 const modScheme = "mod://" // module-resolved ref / locator
 
 // remoteLocatorRe matches a URL scheme (https://, ssh://) or a forced-getter prefix (git::).
-var remoteLocatorRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*(://|::)`)
+func remoteLocatorRe() *regexp.Regexp {
+	return remoteLocatorReOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*(://|::)`) })
+}
+
+var remoteLocatorReOnce lazy[*regexp.Regexp]
 
 // isExternalLocator reports whether a locator names an unsupported remote source: anything
 // with a URL scheme or getter prefix other than mod://. loadRef refuses it.
 func isExternalLocator(locator string) bool {
-	return !strings.HasPrefix(locator, modScheme) && remoteLocatorRe.MatchString(locator)
+	return !strings.HasPrefix(locator, modScheme) && remoteLocatorRe().MatchString(locator)
 }
 
 // refLocatorError reports what is wrong with how a $ref is written, without I/O: a mod://

@@ -118,26 +118,26 @@ func TestParse_outMustPointToStruct(t *testing.T) {
 	}
 }
 
-// TestSuggestor_nilAndBounds pins the documented tolerance: For, Suggest and Closest on a nil
-// Suggestor return nothing; WithMinScore ignores values outside [0,1], NaN included;
+// TestSuggester_nilAndBounds pins the documented tolerance: For, Suggest and Closest on a nil
+// Suggester return nothing; WithMinScore ignores values outside [0,1], NaN included;
 // WithMaxResults(0) uncaps.
-func TestSuggestor_nilAndBounds(t *testing.T) {
-	var s *Suggestor
+func TestSuggester_nilAndBounds(t *testing.T) {
+	var s *Suggester
 	if s.For(&ParseError{Token: "hlep", Candidates: []string{"help"}}) != nil || s.Suggest("hlep", []string{"help"}) != nil {
-		t.Error("nil Suggestor suggested")
+		t.Error("nil Suggester suggested")
 	}
 	if _, ok := s.Closest("hlep", []string{"help"}); ok {
-		t.Error("nil Suggestor Closest found one")
+		t.Error("nil Suggester Closest found one")
 	}
-	n := NewSuggestor().WithMinScore(math.NaN()).WithMinScore(-1).WithMinScore(2)
+	n := NewSuggester().WithMinScore(math.NaN()).WithMinScore(-1).WithMinScore(2)
 	if n.minScore != defaultMinScore {
 		t.Errorf("min score = %v", n.minScore)
 	}
 	cands := []string{"aaaa", "aaab", "aaac", "aaad", "aaae"}
-	if got := NewSuggestor().WithMaxResults(0).Suggest("aaaz", cands); len(got) != 5 {
+	if got := NewSuggester().WithMaxResults(0).Suggest("aaaz", cands); len(got) != 5 {
 		t.Errorf("uncapped = %v", got)
 	}
-	if got := NewSuggestor().Suggest("aaaz", cands); len(got) != 3 {
+	if got := NewSuggester().Suggest("aaaz", cands); len(got) != 3 {
 		t.Errorf("default cap = %v", got)
 	}
 }

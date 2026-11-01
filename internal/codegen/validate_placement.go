@@ -5,45 +5,62 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // Placement hints for the two ways an input key lands one level off: a schema key written on
 // the input entry (`key:` beside `schema:`), and an entry key written inside `schema:`.
 
 // inputDefinitionChannels maps each input entry's schema definition to its channel.
-var inputDefinitionChannels = map[string]string{
-	"FlagInput": "flag", "ArgumentInput": "argument", "EnvInput": "env",
-	"ConfigInput": "config", "StdinSpec": "stdin",
+func inputDefinitionChannels() map[string]string {
+	return inputDefinitionChannelsOnce.value(func() map[string]string {
+		return map[string]string{
+			"FlagInput": "flag", "ArgumentInput": "argument", "EnvInput": "env",
+			"ConfigInput": "config", "StdinSpec": "stdin",
+		}
+	})
 }
+
+var inputDefinitionChannelsOnce lazy[map[string]string]
 
 // schemaKeyChannels lists the channels a channel-specific schema key works on, matching the
 // lint rules that reject it elsewhere. A schema key not listed works on every channel.
-var schemaKeyChannels = map[string][]string{
-	"negatable":      {"flag"},
-	"implicit_value": {"flag"},
-	"dotted_keys":    {"flag"},
-	"from":           {"flag", "argument"},
-	"properties":     {"flag", "stdin"},
-	"separator":      {"flag", "argument", "env"},
-	"complete":       {"flag", "argument"},
-	"variable":       {"flag", "argument", "env"},
-	"variable_file":  {"flag", "argument", "env"},
-	"config_source":  {"flag", "env"},
-	"key":            {"flag", "argument", "config"},
-	"nesting":        {"env"},
-	"file":           {"config"},
-	"repeatable":     {"flag"},
-	"glob":           {"argument"},
-	"expand":         {"flag", "argument", "env", "config"},
-	"relative":       {"flag", "argument", "env", "config"},
-	"base":           {"flag", "argument", "env", "config"},
+func schemaKeyChannels() map[string][]string {
+	return schemaKeyChannelsOnce.value(func() map[string][]string {
+		return map[string][]string{
+			"negatable":      {"flag"},
+			"implicit_value": {"flag"},
+			"dotted_keys":    {"flag"},
+			"from":           {"flag", "argument"},
+			"properties":     {"flag", "stdin"},
+			"separator":      {"flag", "argument", "env"},
+			"complete":       {"flag", "argument"},
+			"variable":       {"flag", "argument", "env"},
+			"variable_file":  {"flag", "argument", "env"},
+			"config_source":  {"flag", "env"},
+			"key":            {"flag", "argument", "config"},
+			"nesting":        {"env"},
+			"file":           {"config"},
+			"repeatable":     {"flag"},
+			"glob":           {"argument"},
+			"expand":         {"flag", "argument", "env", "config"},
+			"relative":       {"flag", "argument", "env", "config"},
+			"base":           {"flag", "argument", "env", "config"},
+		}
+	})
 }
 
+var schemaKeyChannelsOnce lazy[map[string][]string]
+
 // channelPlurals names each channel's entries in a hint.
-var channelPlurals = map[string]string{
-	"flag": "flags", "argument": "arguments", "env": "env inputs", "config": "config inputs", "stdin": "stdin",
+func channelPlurals() map[string]string {
+	return channelPluralsOnce.value(func() map[string]string {
+		return map[string]string{
+			"flag": "flags", "argument": "arguments", "env": "env inputs", "config": "config inputs", "stdin": "stdin",
+		}
+	})
 }
+
+var channelPluralsOnce lazy[map[string]string]
 
 // schemaKeyFits reports whether key is a schema key that takes effect on channel.
 func schemaKeyFits(channel, key string) bool {
@@ -51,7 +68,7 @@ func schemaKeyFits(channel, key string) bool {
 	if err != nil || !sets.input[key] {
 		return false
 	}
-	chans, limited := schemaKeyChannels[key]
+	chans, limited := schemaKeyChannels()[key]
 	return !limited || slices.Contains(chans, channel)
 }
 
@@ -59,7 +76,7 @@ func schemaKeyFits(channel, key string) bool {
 // definition: where the key belongs when it is a schema key that works on this channel, which
 // channels take it when it works on others only, or "".
 func schemaPlacementHint(definition, key string) string {
-	channel, ok := inputDefinitionChannels[definition]
+	channel, ok := inputDefinitionChannels()[definition]
 	if !ok {
 		return ""
 	}
@@ -67,13 +84,13 @@ func schemaPlacementHint(definition, key string) string {
 		return fmt.Sprintf("%q belongs under schema: (schema: {%s: …})", key, key)
 	}
 	sets, err := loadSchemaBlockKeys()
-	chans, limited := schemaKeyChannels[key]
+	chans, limited := schemaKeyChannels()[key]
 	if err != nil || !sets.input[key] || !limited {
 		return ""
 	}
 	names := make([]string, len(chans))
 	for i, c := range chans {
-		names[i] = channelPlurals[c]
+		names[i] = channelPlurals()[c]
 	}
 	return fmt.Sprintf("%q is a schema key of %s only", key, joinAnd(names))
 }
@@ -97,27 +114,31 @@ func entryPlacementHint(channel, key string) string {
 
 // loadEntryKeys returns each channel's entry keys (the input definition's properties other
 // than schema), read from the embedded spec schema.
-var loadEntryKeys = sync.OnceValue(func() map[string]map[string]bool {
-	var doc struct {
-		Definitions map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"definitions"`
-	}
-	out := map[string]map[string]bool{}
-	if json.Unmarshal(schemaSpecFileBytes, &doc) != nil {
-		return out
-	}
-	for def, channel := range inputDefinitionChannels {
-		keys := map[string]bool{}
-		for k := range doc.Definitions[def].Properties {
-			if k != "schema" {
-				keys[k] = true
-			}
+func loadEntryKeys() map[string]map[string]bool {
+	return loadEntryKeysOnce.value(func() map[string]map[string]bool {
+		var doc struct {
+			Definitions map[string]struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"definitions"`
 		}
-		out[channel] = keys
-	}
-	return out
-})
+		out := map[string]map[string]bool{}
+		if json.Unmarshal(schemaSpecFileBytes, &doc) != nil {
+			return out
+		}
+		for def, channel := range inputDefinitionChannels() {
+			keys := map[string]bool{}
+			for k := range doc.Definitions[def].Properties {
+				if k != "schema" {
+					keys[k] = true
+				}
+			}
+			out[channel] = keys
+		}
+		return out
+	})
+}
+
+var loadEntryKeysOnce lazy[map[string]map[string]bool]
 
 // joinAnd joins words as a prose list: "a", "a and b", "a, b and c".
 func joinAnd(words []string) string {

@@ -3,7 +3,7 @@ package codegen
 import "fmt"
 
 // Typo suggestions for lint messages, used at codegen time only. The runtime's opt-in
-// Suggestor is separate.
+// Suggester is separate.
 
 // didYouMean appends "; did you mean %q?" to msg when a candidate is within edit distance 2
 // of name, and returns msg unchanged otherwise.

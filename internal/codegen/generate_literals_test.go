@@ -211,7 +211,7 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 			t.Errorf("literal missing %s:\n%s", want, lit)
 		}
 	}
-	cmds := rnodesLiteral("app", "app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
+	cmds := rnodesLiteral("app", "app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil, nil)
 	if !strings.Contains(cmds, `Deprecated: "use app make"`) {
 		t.Errorf("command literal missing its message:\n%s", cmds)
 	}
@@ -227,19 +227,19 @@ func TestInputSettings_configSourceVariables(t *testing.T) {
 		{"the flag's variable", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}`},
 		{"the flag's variables, then the env input's", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: [ACME_CONFIG, ACME_CFG], config_source: user}}
   env:
     - {name: config_path, schema: {type: string, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG,ACME_CFG,ACME_CONFIG_PATH"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG", "ACME_CFG", "ACME_CONFIG_PATH"}}`},
 		{"a variable both name is listed once", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}
   env:
     - {name: config, schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}`},
 		{"a flag with no variable", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, config_source: user}}`,

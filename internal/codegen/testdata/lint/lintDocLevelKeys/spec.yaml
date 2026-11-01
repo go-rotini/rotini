@@ -1,4 +1,4 @@
-# env_prefix, schemas and display_name are read only on the root; deeper they are a silent no-op.
+# The root-only keys are read only on the root; deeper they are a silent no-op.
 version: 0.0.0
 command:
   name: demo
@@ -7,3 +7,25 @@ command:
       env_prefix: DEMO
     - name: ship
       display_name: demo ship
+    - name: get
+      exit_statuses:
+        busy: { code: 4, summary: locked }
+    - name: put
+      schemas:
+        Task: { type: object }
+      response_files: { prefix: "@" }
+      channels:
+        - name: audit
+          class: info
+          schema: { type: object }
+    - name: show
+      flag_sets:
+        Local:
+          flags:
+            - name: y
+              schema: { type: bool }
+      multicall: true
+      topics:
+        - name: inner
+          summary: inner topic
+          body: Inner.

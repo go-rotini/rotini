@@ -27,7 +27,7 @@ func TestFormatKeyOrderComplete(t *testing.T) {
 				t.Errorf("%s (%s): key %q has no place in fmt's key order", path, s.kind, key)
 			}
 		}
-		if order, ok := fmtKeyOrders[s.kind]; ok {
+		if order, ok := fmtKeyOrders()[s.kind]; ok {
 			if declared[s.kind] == nil {
 				declared[s.kind] = map[string]bool{}
 			}
@@ -49,7 +49,7 @@ func TestFormatKeyOrderComplete(t *testing.T) {
 	walk(schemas.command, "command")
 
 	used := map[string]bool{} // a key one of an order's kinds declares
-	for kind, order := range fmtKeyOrders {
+	for kind, order := range fmtKeyOrders() {
 		if declared[kind] == nil {
 			t.Errorf("no schema object is a %s; was the definition renamed?", kind)
 			continue

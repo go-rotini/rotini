@@ -1,6 +1,7 @@
-# R12 — the crash report recipe: a reporter that, only when the user sets CRASHDEMO_CRASH_DIR,
-# writes a panic's value, stack, version and platform to a file there and says where. The
-# reporter and main.go are the ones the guide shows.
+# R12 — the crash report recipe: a reporter that reports the run as the default reporter does
+# and, after a panic and only when the user sets CRASHDEMO_CRASH_DIR, writes the panic's value,
+# stack, version and platform to a file there and says where. The reporter and main.go are the
+# ones the guide shows.
 
 gomodinit example.com/crashdemo
 
@@ -13,15 +14,20 @@ exec go build -o crashdemo$exe ./cmd/crashdemo
 
 # Off by default: the panic is reported, with how to turn reports on, and nothing is written.
 wantexit 1 ./crashdemo$exe boom --note private-note
-stderr '^Error: runtime error: index out of range'
+stderr '^Fatal Error: runtime error: index out of range'
 stderr 'set CRASHDEMO_CRASH_DIR'
 ! exists crashes
+
+# A failure that isn't a panic is reported as usual, with no word of crash reports.
+wantexit 1 ./crashdemo$exe boom --nope
+stderr '\AError: '
+! stderr CRASHDEMO_CRASH_DIR
 
 # On: the report holds the stack and the version, never the command line.
 mkdir crashes
 env CRASHDEMO_CRASH_DIR=$WORK/crashes
 wantexit 1 ./crashdemo$exe boom --note private-note
-stderr '\AError: runtime error: index out of range \[3\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
+stderr '\AFatal Error: runtime error: index out of range \[3\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
 [unix] exec sh -c 'cat crashes/crashdemo-*.txt'
 [unix] stdout '^version: 1\.0\.0$'
 [unix] stdout 'goroutine'
@@ -30,7 +36,7 @@ stderr '\AError: runtime error: index out of range \[3\] with length 0\ncrash re
 
 # The guide's run: the panic, then where the report went.
 wantexit 1 ./crashdemo$exe boom
-stderr '\AError: runtime error: index out of range \[1\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
+stderr '\AFatal Error: runtime error: index out of range \[1\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
 
 -- report.go.txt --
 package crashdemo
@@ -44,33 +50,24 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// Report prints what the run recorded to stderr and exits 1 when it failed. After a panic it
-// writes a crash report, but only when the user set CRASHDEMO_CRASH_DIR: the report holds the
-// panic, its stack, the version and the platform, never the command line or inputs, which may
-// hold secrets.
+// Report reports the run as rotini's default reporter does. After a panic it also writes a
+// crash report, but only when the user set CRASHDEMO_CRASH_DIR: the report holds the panic,
+// its stack, the version and the platform, never the command line or inputs, which may hold
+// secrets.
 func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
-	for _, w := range out.Warnings {
-		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	rotini.DefaultReporter(ctx, rtx, out)
+	if len(out.Panics) == 0 {
+		return
 	}
-	for _, err := range out.Errors {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	dir, ok := rtx.LookupEnv("CRASHDEMO_CRASH_DIR")
+	if !ok || dir == "" {
+		fmt.Fprintln(rtx.Stderr, "This is a bug. To save a crash report to attach to an issue, set CRASHDEMO_CRASH_DIR to a directory.")
+		return
 	}
-	for _, p := range out.Panics {
-		fmt.Fprintln(rtx.Stderr, "Error:", p)
-	}
-	if len(out.Panics) > 0 {
-		if dir, ok := rtx.LookupEnv("CRASHDEMO_CRASH_DIR"); ok && dir != "" {
-			if path, err := writeCrash(dir, rtx.Version(), out.Panics[0]); err != nil {
-				fmt.Fprintln(rtx.Stderr, "could not write a crash report:", err)
-			} else {
-				fmt.Fprintln(rtx.Stderr, "crash report written to", path)
-			}
-		} else {
-			fmt.Fprintln(rtx.Stderr, "This is a bug. To save a crash report to attach to an issue, set CRASHDEMO_CRASH_DIR to a directory.")
-		}
-	}
-	if out.Failed() && ctx.Err() == nil {
-		rtx.Exit(1)
+	if path, err := writeCrash(dir, rtx.Version(), out.Panics[0]); err != nil {
+		fmt.Fprintln(rtx.Stderr, "could not write a crash report:", err)
+	} else {
+		fmt.Fprintln(rtx.Stderr, "crash report written to", path)
 	}
 }
 

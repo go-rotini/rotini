@@ -1,0 +1,142 @@
+# R16 — generators: a program the conf names reads the contract on stdin and returns files,
+# which rotini writes like its own outputs. A regenerate writes nothing, a dry run exits 2 when
+# something would change, a file the generator stops returning is removed (and only such a
+# file), and a generator that fails fails generate with its stderr.
+
+gomodinit example.com/todo
+
+# ── the generator's files are written, with the manifest of what it owns ─────
+exec rotini generate .rotini.spec.yaml
+cmp docs/commands/todo-add.md want-add.md
+exists docs/commands/todo.md
+exists docs/commands/todo-list.md
+! exists docs/commands/todo-debug.md
+cmp docs/commands/.rotini-generated want-manifest.txt
+cmp docs/commands/README.md README.md
+
+# ── a regenerate writes nothing ──────────────────────────────────────────────
+exec rotini generate .rotini.spec.yaml --dry-run
+! stderr .
+
+# ── a removed command's file: listed by a dry run, then removed ──────────────
+cp spec-without-list.yaml .rotini.spec.yaml
+wantexit 2 rotini generate .rotini.spec.yaml --dry-run
+stderr 'delete docs/commands/todo-list\.md'
+stderr 'update docs/commands/\.rotini-generated'
+exists docs/commands/todo-list.md
+exec rotini generate .rotini.spec.yaml
+! exists docs/commands/todo-list.md
+exists docs/commands/todo-add.md
+cmp docs/commands/README.md README.md
+# The second generate deletes the command's disabled handler; the generator's files are settled.
+exec rotini generate .rotini.spec.yaml
+exec rotini generate .rotini.spec.yaml --dry-run
+! stderr .
+
+# ── a generator that fails fails generate before anything is written ────────
+cp internal/cmd/todo/zz_rotini.go zz-before.txt
+cp spec-no-summary.yaml .rotini.spec.yaml
+wantexit 1 rotini generate .rotini.spec.yaml
+stderr 'generator "docs": run go run \./tools/mdgen: exit status 1'
+stderr 'mdgen: todo add has no summary'
+cmp internal/cmd/todo/zz_rotini.go zz-before.txt
+cmp docs/commands/todo-add.md want-add.md
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  commands:
+    - name: add
+      summary: add a task
+    - name: list
+      summary: list the tasks
+    - name: debug
+      summary: dump internal state
+      hidden: true
+-- spec-without-list.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  commands:
+    - name: add
+      summary: add a task
+    - name: debug
+      summary: dump internal state
+      hidden: true
+-- spec-no-summary.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  commands:
+    - name: add
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  generators:
+    - name: docs
+      run: [go, run, ./tools/mdgen]
+      dir: docs/commands
+-- docs/commands/README.md --
+Written by hand; the generator never returns it, so rotini leaves it alone.
+-- README.md --
+Written by hand; the generator never returns it, so rotini leaves it alone.
+-- want-add.md --
+# todo add
+
+add a task
+-- want-manifest.txt --
+# rotini generate wrote these files for generator "docs", and removes one it stops writing. Do not edit.
+todo-add.md
+todo-list.md
+todo.md
+-- tools/mdgen/main.go --
+// Command mdgen is a rotini generator: it reads the contract document on stdin and returns one
+// markdown page per visible command.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+type contract struct {
+	Commands []struct {
+		Name    string `json:"name"`
+		Summary string `json:"summary"`
+		Hidden  bool   `json:"hidden"`
+	} `json:"commands"`
+}
+
+type file struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+func main() {
+	var c contract
+	if err := json.NewDecoder(os.Stdin).Decode(&c); err != nil {
+		fmt.Fprintln(os.Stderr, "mdgen:", err)
+		os.Exit(1)
+	}
+	files := []file{}
+	for _, cmd := range c.Commands {
+		if cmd.Hidden {
+			continue
+		}
+		if cmd.Summary == "" {
+			fmt.Fprintf(os.Stderr, "mdgen: %s has no summary\n", cmd.Name)
+			os.Exit(1)
+		}
+		files = append(files, file{
+			Path:    strings.ReplaceAll(cmd.Name, " ", "-") + ".md",
+			Content: "# " + cmd.Name + "\n\n" + cmd.Summary + "\n",
+		})
+	}
+	json.NewEncoder(os.Stdout).Encode(map[string]any{"rotini_generator": 1, "files": files})
+}

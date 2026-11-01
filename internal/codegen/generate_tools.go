@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 )
 
@@ -21,14 +20,30 @@ import (
 // (unless `agent: true`), and the machine-output flag, which the caller adds itself. Env and
 // config inputs are the server's configuration, never parameters.
 
-// toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under.
-const toolsMetaKey = "dev.rotini/invoke"
+// toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under, and
+// toolsMetadataKey the one its command's `metadata` labels live under.
+const (
+	toolsMetaKey     = "dev.rotini/invoke"
+	toolsMetadataKey = "dev.rotini/metadata"
+)
 
 // Tool name limits per target.
-var toolNameLimits = map[string]int{"mcp": 128, "openai-strict": 64, "gemini": 128}
+func toolNameLimits() map[string]int {
+	return toolNameLimitsOnce.value(func() map[string]int {
+		return map[string]int{"mcp": 128, "openai-strict": 64, "gemini": 128}
+	})
+}
+
+var toolNameLimitsOnce lazy[map[string]int]
 
 // toolFiles are the file each tools target writes.
-var toolFiles = map[string]string{"mcp": "mcp.json", "openai-strict": "openai.json", "gemini": "gemini.json"}
+func toolFiles() map[string]string {
+	return toolFilesOnce.value(func() map[string]string {
+		return map[string]string{"mcp": "mcp.json", "openai-strict": "openai.json", "gemini": "gemini.json"}
+	})
+}
+
+var toolFilesOnce lazy[map[string]string]
 
 // tool is one command as a target-neutral tool definition. Its schemas are draft-07 style,
 // with references to "#/definitions/<name>" resolved by defs.
@@ -43,6 +58,8 @@ type tool struct {
 	output      map[string]any // the output schema without its own definitions; nil for none
 	outputDefs  map[string]any
 	invoke      toolInvoke
+	examples    []any     // calls that run the spec's examples of the command, as parameter objects
+	shown       []Example // the examples those calls run, in the same order
 }
 
 // toolInvoke is what a server needs to turn a tool call back into a command line. It rides in
@@ -100,9 +117,13 @@ func renderToolExports(p *program, f *Feature, a *agentProgram, _ *template.Temp
 	if err != nil {
 		return nil, nil, err
 	}
+	uses := p.exampleUses()
+	for i := range tools {
+		tools[i].examples, tools[i].shown = tools[i].inputExamples(uses[strings.Join(tools[i].invoke.Path, " ")])
+	}
 	for _, t := range tools {
 		for _, target := range targets {
-			if limit := toolNameLimits[target]; len(t.name) > limit {
+			if limit := toolNameLimits()[target]; len(t.name) > limit {
 				return nil, nil, fmt.Errorf("the tool name %q for %q is longer than %s allows (%d characters)", t.name, t.cmd.invocation, target, limit)
 			}
 		}
@@ -120,7 +141,7 @@ func renderToolExports(p *program, f *Feature, a *agentProgram, _ *template.Temp
 			doc, more = geminiTools(tools)
 		}
 		notices = append(notices, more...)
-		files[toolFiles[target]] = marshalJSONFile(doc)
+		files[toolFiles()[target]] = marshalJSONFile(doc)
 	}
 	if f.Go {
 		p.toolsGo = files["mcp.json"]
@@ -554,16 +575,25 @@ func (t tool) inputSchema(defsKey string) map[string]any {
 
 // ─── mcp ────────────────────────────────────────────────────────────────────────.
 
-// mcpTools renders the tools as an MCP tools/list result.
+// mcpTools renders the tools as an MCP tools/list result. A tool's input examples are its
+// input schema's `examples`.
 func mcpTools(tools []tool) map[string]any {
 	list := make([]any, 0, len(tools))
 	for _, t := range tools {
+		in := t.inputSchema("$defs")
+		if len(t.examples) > 0 {
+			in["examples"] = jsonCopy(t.examples)
+		}
+		meta := map[string]any{toolsMetaKey: t.invoke}
+		if len(t.cmd.c.Metadata) > 0 {
+			meta[toolsMetadataKey] = t.cmd.c.Metadata
+		}
 		m := map[string]any{
 			"name":        t.name,
 			"title":       t.title,
 			"description": t.description,
-			"inputSchema": t.inputSchema("$defs"),
-			"_meta":       map[string]any{toolsMetaKey: t.invoke},
+			"inputSchema": in,
+			"_meta":       meta,
 		}
 		if t.output != nil {
 			o, _ := jsonCopy(t.output).(map[string]any)
@@ -642,7 +672,7 @@ func openAITools(tools []tool) (any, []error) {
 		list = append(list, map[string]any{
 			"type":        "function",
 			"name":        t.name,
-			"description": t.description,
+			"description": describedExamples(t.description, t.shown),
 			"parameters":  params,
 			"strict":      true,
 		})
@@ -870,7 +900,11 @@ var geminiKeys = []string{
 }
 
 // geminiName is the rule Gemini (Vertex AI) has for parameter names.
-var geminiName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) })
+func geminiName() *regexp.Regexp {
+	return geminiNameOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) })
+}
+
+var geminiNameOnce lazy[*regexp.Regexp]
 
 // geminiTools renders the tools as Gemini function declarations, with JSON Schema parameters
 // (parametersJsonSchema). References are inlined unless a schema is recursive, and parameter
@@ -911,7 +945,7 @@ func geminiTools(tools []tool) (any, []error) {
 				}
 			}
 		}
-		list = append(list, map[string]any{"name": t.name, "description": t.description, "parametersJsonSchema": params})
+		list = append(list, map[string]any{"name": t.name, "description": describedExamples(t.description, t.shown), "parametersJsonSchema": params})
 	}
 	return map[string]any{"functionDeclarations": list}, notices
 }

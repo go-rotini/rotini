@@ -1,0 +1,48 @@
+# Each generator has a name and a directory of its own, apart from everything rotini writes.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: markdown
+      enabled: true
+      install_dir: docs/cli
+  contract:
+    file: cli-contract.json
+  generators:
+    # Correct. No problem.
+    - name: site
+      run: [go, run, ./tools/site]
+      dir: docs/site
+      keep: [index.md]
+    # The same name twice.
+    - name: site
+      run: [go, run, ./tools/site]
+      dir: docs/other
+    # Inside another generator's dir.
+    - name: nested
+      run: [go, tool, nested]
+      dir: docs/site/nested
+    # Contains a directory rotini writes.
+    - name: docs
+      run: [go, tool, docs]
+      dir: docs
+    # Inside the cmd package.
+    - name: incmd
+      run: [go, tool, incmd]
+      dir: internal/cmd/demo/extra
+    # The module root.
+    - name: root
+      run: [go, tool, root]
+      dir: .
+    # Escapes the module.
+    - name: outside
+      run: [go, tool, outside]
+      dir: ../elsewhere
+    # A keep path that leaves the dir.
+    - name: keeper
+      run: [go, tool, keeper]
+      dir: catalog
+      keep: [../secret.txt]

@@ -15,7 +15,8 @@ go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 {{< /code >}}
 
 Then run it with `go tool rotini <command>`. To call `rotini` directly instead, install it with
-`go install github.com/go-rotini/rotini/cmd/rotini@latest`.
+`go install github.com/go-rotini/rotini/cmd/rotini@latest`. The `//go:generate` line `rotini init`
+seeds runs `go tool rotini`, so `go generate` still needs the tool in the module.
 
 A mistyped command, flag or value names the nearest one the tool accepts:
 
@@ -24,7 +25,7 @@ $ go tool rotini genrate
 Error: rotini: unknown command "genrate"; did you mean "generate"?
 {{< /code >}}
 
-The companion CLI opts into these suggestions with rotini's `Suggestor`. A CLI you build with
+The companion CLI opts into these suggestions with rotini's `Suggester`. A CLI you build with
 rotini suggests nothing unless you opt in the same way; see
 [suggesting a correction](/docs#suggesting-a-correction).
 
@@ -85,18 +86,22 @@ old one and keeps both.
 
 On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then
 the time and how long it took. It prints the warnings `generate` prints, such as each handler it
-disabled or turned back on. In a module that does not yet require the rotini package, it also
-warns, since the first build would fail without it:
+disabled or turned back on. The seeded `cmd/<name>/main.go` regenerates through
+`//go:generate go tool rotini generate …`, so in a module that does not yet declare the companion
+as a tool, `init` also warns, naming the `go get -tool` that adds it (and the rotini package the
+first build needs):
 
 {{< code title="init output" language="text" open="true" collapsible="false" copy="false" >}}
 spec: cmd/mycli/.rotini.spec.yaml
 conf: cmd/mycli/.rotini.conf.yaml
 [14:02:11] 5.05ms
-Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get github.com/go-rotini/rotini` before building ./cmd/mycli
+Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get -tool github.com/go-rotini/rotini/cmd/rotini` before building ./cmd/mycli (it adds the package and the tool the go:generate line runs)
 {{< /code >}}
 
-A module that added the tool with `go get -tool` already requires the package, so this warning
-does not appear there.
+A module that already requires the package but not the tool, as after a `go install` of the
+companion, gets the same `go get -tool` for `go generate`. A module that added the tool with
+`go get -tool` gets no warning. With no `go.mod` at all, `init` stops and says to run
+`go mod init <module>` first.
 
 `--dry-run` (`-n`) shows what `init` would write and writes nothing. It prints the spec and conf
 lines, lists each file it would create (or, with `--force`, update) on stderr, and exits 2. With
@@ -791,7 +796,7 @@ Use "rotini help <command>" for more information about a command.
 ## rotini completion
 
 Prints the shell completion script for bash, zsh, fish, PowerShell or Nushell, using the same generated
-`Completion(shell)` function any rotini CLI gets with the `completion` feature on. While a value
+`CompletionScript(shell)` function any rotini CLI gets with the `completion` feature on. While a value
 with nothing to offer is being completed, such as the name `init` takes, zsh and bash 4.4 or later show a line
 saying what it is; set `ROTINI_COMPLETION_MESSAGES=off` to hide those lines.
 

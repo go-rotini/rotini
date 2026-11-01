@@ -77,7 +77,7 @@ func TestFlagSets_generate(t *testing.T) {
 		t.Errorf("set struct embedded %d times, want 3", n)
 	}
 	for _, want := range []string{
-		"type AcmeListFlags struct {\n\tAll    bool `rotini:\"all\"`\n\tOldAll bool `rotini:\"old-all\"`\n\tAcmeOutputFlagSet\n}",
+		"type AcmeListFlags struct {\n\t// every thing\n\tAll bool `rotini:\"all\"`\n\t// every thing\n\t//\n\t// Deprecated: renamed\n\tOldAll bool `rotini:\"old-all\"`\n\tAcmeOutputFlagSet\n}",
 		"type AcmeShowFlags struct {\n\tAcmeOutputFlagSet\n}",
 		`Name: "format", Identifiers: []string{"--format"}`,
 		`When: "format", Requires: []string{"delimiter"}, Equals: []string{"csv"}`,

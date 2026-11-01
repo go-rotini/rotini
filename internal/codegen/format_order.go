@@ -30,6 +30,7 @@ var commandKeyOrder = []string{
 	"topics",
 	"see_also",
 	"exit_status",
+	"exit_statuses",
 	"stability",
 	"deprecated",
 	"deprecated_since",
@@ -60,6 +61,7 @@ var commandKeyOrder = []string{
 	// What it writes.
 	"output",
 	"output_stream",
+	"channels",
 
 	// What it is made of.
 	"commands",
@@ -103,31 +105,43 @@ var inputKeyOrder = []string{
 }
 
 // fmtKeyOrders maps a schema definition to the key order that replaces its declared order.
-var fmtKeyOrders = map[string][]string{
-	"Command":       commandKeyOrder,
-	"FlagInput":     inputKeyOrder,
-	"ArgumentInput": inputKeyOrder,
-	"EnvInput":      inputKeyOrder,
-	"ConfigInput":   inputKeyOrder,
+func fmtKeyOrders() map[string][]string {
+	return fmtKeyOrdersOnce.value(func() map[string][]string {
+		return map[string][]string{
+			"Command":       commandKeyOrder,
+			"FlagInput":     inputKeyOrder,
+			"ArgumentInput": inputKeyOrder,
+			"EnvInput":      inputKeyOrder,
+			"ConfigInput":   inputKeyOrder,
+		}
+	})
 }
+
+var fmtKeyOrdersOnce lazy[map[string][]string]
 
 // fmtTypeFirst names the definitions whose `type` is written first: value schemas, and the
 // conf's features, where `type` says what the entry is.
-var fmtTypeFirst = map[string]bool{"BaseSchema": true, "InputSchema": true, "Schema": true, "Feature": true}
+func fmtTypeFirst() map[string]bool {
+	return fmtTypeFirstOnce.value(func() map[string]bool {
+		return map[string]bool{"BaseSchema": true, "InputSchema": true, "Schema": true, "Feature": true}
+	})
+}
+
+var fmtTypeFirstOnce lazy[map[string]bool]
 
 // fmtRanks returns each key's position in the canonical order of an object with schema sch.
 // A command or input takes its reading order from fmtKeyOrders. Any other object keeps the
 // schema's declared order, with "$schema" and "name" first, or `type` first for fmtTypeFirst.
 func fmtRanks(sch *fmtSchema) map[string]int {
 	rank := map[string]int{}
-	if order, ok := fmtKeyOrders[sch.kind]; ok {
+	if order, ok := fmtKeyOrders()[sch.kind]; ok {
 		for i, key := range order {
 			rank[key] = i
 		}
 		return rank
 	}
 	hoisted := []string{"$schema", "name"}
-	if fmtTypeFirst[sch.kind] {
+	if fmtTypeFirst()[sch.kind] {
 		hoisted = []string{"type"}
 	}
 	for i, key := range hoisted {

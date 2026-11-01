@@ -303,7 +303,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = scoped(dash.typed(checkTypedFlag(fs, fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f), frame.Name, flagLabel(fd))
+				err = scoped(dash.typed(checkTypedFlag(fs, fd, f, view), fd.Type, flagLabel(fd), flagLabel(fd), f), frame.Name, flagLabel(fd))
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -312,7 +312,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = scoped(dash.typed(checkTypedArg(fs, ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f), frame.Name, "")
+					err = scoped(dash.typed(checkTypedArg(fs, ad, f, view), ad.Type, "<"+ad.Name+">", "", f), frame.Name, "")
 				}
 			})
 		}
@@ -360,7 +360,7 @@ func checkAbsentItemCounts(v reflect.Value, chain []Command, anchor int, set Pre
 }
 
 // checkTypedFlag applies a flag's value rules to its typed field, naming the flag canonically.
-func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) error {
+func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, view *osView) error {
 	label := flagLabel(fd)
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -380,11 +380,11 @@ func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) err
 			return enum.violation(label, label, s, fd.Secret)
 		}
 	}
-	return checkTypedConstraints(fs, label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
+	return checkTypedConstraints(fs, label, fd.Type, fd.Constraints, count, elems, fd.Secret, view)
 }
 
 // checkTypedArg applies an argument's value rules to its typed field.
-func checkTypedArg(fs *featureSet, ad ArgDef, f reflect.Value, dir string) error {
+func checkTypedArg(fs *featureSet, ad ArgDef, f reflect.Value, view *osView) error {
 	label := "<" + ad.Name + ">"
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -396,7 +396,7 @@ func checkTypedArg(fs *featureSet, ad ArgDef, f reflect.Value, dir string) error
 			return enum.violation(label, "", s, ad.Secret)
 		}
 	}
-	return checkTypedConstraints(fs, label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
+	return checkTypedConstraints(fs, label, ad.Type, ad.Constraints, count, elems, ad.Secret, view)
 }
 
 // checkTypedChannelField applies an environment or config field's tag-declared enum and
@@ -432,7 +432,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if isPathType(typ) && len(elems) == 1 && typedText(elems[0]) == "" {
 		typ = channelGoType(f.Type()) // an empty path is no path: nothing to check
 	}
-	return checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view.base())
+	return checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view)
 }
 
 // checkTypedChannelPresence reports a required environment, config or stdin input the
@@ -458,10 +458,10 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 					if tag.Get("env") != "" {
 						names = strings.Split(tag.Get("env"), ",")
 					}
-					err = usageBind(channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
+					err = usageBind(InputErrorKindMissingRequired, channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
 					return
 				}
-				err = usageBind(channelConfig, key, "config key "+key+" is required", nil)
+				err = usageBind(InputErrorKindMissingRequired, channelConfig, key, "config key "+key+" is required", nil)
 			})
 		}
 		if err != nil || scope != len(chain)-1 {
@@ -476,7 +476,7 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 			return // not required, or the file argument is the input
 		}
 		if _, given := set[fieldPath(top, "Stdin")]; !given {
-			err = usageBind(channelStdin, "", "required stdin payload is missing", nil)
+			err = usageBind(InputErrorKindMissingRequired, channelStdin, "", "required stdin payload is missing", nil)
 		}
 	})
 	return err
@@ -527,7 +527,7 @@ func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string
 	}
 	if err := validator.Validate(doc); err != nil {
 		if errors.Is(err, errSchemaUnfinished) {
-			return usageBind(channelStdin, "", stdinUnfinished, err)
+			return usageBind(InputErrorKindSchemaViolation, channelStdin, "", stdinUnfinished, err)
 		}
 		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
@@ -567,7 +567,7 @@ func toDocument(v any) (map[string]any, error) {
 
 // checkTypedConstraints is [checkConstraints] over typed values: count is the collection's
 // size (for item-count bounds) and elems its values, each checked by the input's element type.
-func checkTypedConstraints(fs *featureSet, label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
+func checkTypedConstraints(fs *featureSet, label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, view *osView) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, count); err != nil {
 			return err
@@ -594,7 +594,7 @@ func checkTypedConstraints(fs *featureSet, label, typ string, c Constraints, cou
 		case isPathType(elem):
 			s := typedText(e)
 			if err = checkStringBounds(fs, label, c, s, secret); err == nil {
-				err = checkPathExists(label, elem, s, dir)
+				err = checkPathExists(label, elem, s, view)
 			}
 		case elem == "string":
 			err = checkStringBounds(fs, label, c, typedText(e), secret)
@@ -763,7 +763,7 @@ func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string
 		}
 		if err := fs.schemas.document(js, raw); err != nil {
 			if ie, ok := asError[*InputError](err); ok {
-				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+				return &InputError{Kind: ie.Kind, Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
 			}
 			return err
 		}

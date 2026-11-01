@@ -11,8 +11,8 @@ import (
 
 // runImport runs an import with opts, completed by the flags every import command takes,
 // and reports it: the notes and summary on stderr, then the files on stdout, with a warning
-// when go.mod doesn't require the runtime yet.
-func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOptions, set RotiniImportFlagSet) {
+// when go.mod doesn't require the runtime yet. It returns the error that fails the run.
+func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOptions, set RotiniImportFlagSet) error {
 	opts.Dir = set.Dir
 	opts.Format = set.Format
 	opts.Tags = set.Tags
@@ -26,7 +26,7 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		dep, run = importDryRunDep, processor.ImportDryRun
 	}
 	rtx.SetDependencyIfAbsent(dep, run)
-	imported, err := rtx.MustGetDependency(dep)(ctx, opts)
+	imported, err := rtx.MustDependency(dep)(ctx, opts)
 
 	// The loss report comes first, whether or not the spec could be written.
 	for _, note := range imported.Notes {
@@ -36,23 +36,20 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		fmt.Fprintln(rtx.Stderr, imported.Summary)
 	}
 	if err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 
 	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", filepath.ToSlash(imported.Spec), filepath.ToSlash(imported.Conf)); err != nil {
-		haltWithWriteError(rtx, err)
-		return
+		return writeError(err)
 	}
 	if set.DryRun {
-		reportPlanned(rtx, imported.Result, imported.Changes)
-		return
+		return reportPlanned(rtx, imported.Result, imported.Changes)
 	}
 	if _, err := fmt.Fprintln(rtx.Stdout, imported.Result); err != nil {
-		haltWithWriteError(rtx, err)
-		return
+		return writeError(err)
 	}
-	if !requiresRuntime(".") {
-		rtx.RecordWarning(missingRuntime(".", "building the imported CLI"))
+	if err := moduleSetup(".", "building the imported CLI"); err != nil {
+		rtx.RecordWarning(err)
 	}
+	return nil
 }

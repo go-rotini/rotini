@@ -20,6 +20,9 @@ Flags:
                          also set by DEPLOY_REGION or config key region
       --prune            remove old releases (destructive, not idempotent)
 
+Files:
+  ./deploy.yaml
+
 Global Flags:
       --verbose    say more
                    also set by APP_LOG_VERBOSE or config key log.verbose

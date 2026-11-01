@@ -25,9 +25,16 @@ const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 // when there are none. It uses gogen.Generate, the engine behind the spec and conf
 // types.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
+	types, _, err := buildOutputTypesConsts(gp, pkg)
+	return types, err
+}
+
+// buildOutputTypesConsts is [buildOutputTypes], also returning the enum value constants of the
+// generated types' string fields (see outputEnumGroups), which the caller declares.
+func buildOutputTypesConsts(gp *program, pkg string) (string, []constGroup, error) {
 	defs := collectOutputDefs(gp)
 	if len(defs) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	unions := collectOutputUnions(gp)
 	doc, err := json.Marshal(map[string]any{
@@ -36,13 +43,13 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 		"definitions": defs,
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal output schema document: %w", err)
+		return "", nil, fmt.Errorf("marshal output schema document: %w", err)
 	}
 	src, err := gogen.Generate(doc,
 		gogen.WithPackage(pkg),
 		gogen.WithRootType(outputRootSentinel))
 	if err != nil {
-		return "", fmt.Errorf("generate output types: %w", err)
+		return "", nil, fmt.Errorf("generate output types: %w", err)
 	}
 	fixed := map[string]bool{}
 	for name := range defs {
@@ -50,11 +57,11 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	}
 	sized, err := sizedNumberTypes(stripGenerated(string(src), outputRootSentinel), defs)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	types, err := initialismIdents(sized, fixed)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var b strings.Builder
 	b.WriteString(types)
@@ -62,7 +69,12 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 		b.WriteString("\n\n")
 		b.WriteString(u.decl())
 	}
-	return b.String(), nil
+	b.WriteString(channelErrorMethods(gp.channels))
+	groups, err := outputEnumGroups(types, defs)
+	if err != nil {
+		return "", nil, err
+	}
+	return b.String(), groups, nil
 }
 
 // outputUnion is the <Prefix>Output interface of a stream whose items come in several kinds,
@@ -220,9 +232,9 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 }
 
 // collectOutputDefs assembles the JSON Schema `definitions` for buildOutputTypes: each named
-// schema, plus "<Prefix>Output" for each own command declaring an output and "<Prefix>Stdin"
-// for each declaring a decoded (non-raw) stdin payload. "#/schemas/" refs become
-// "#/definitions/".
+// schema, plus "<Prefix>Output" for each own command declaring an output, "<Prefix>Stdin"
+// for each declaring a decoded (non-raw) stdin payload, and "<Name>Record" for each channel
+// the spec declares. "#/schemas/" refs become "#/definitions/".
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
@@ -253,6 +265,9 @@ func collectOutputDefs(gp *program) map[string]any {
 	}
 	add(gp.rootPascal, gp.rootOutput)
 	addStdin(gp.rootPascal, gp.rootInputs)
+	for _, c := range gp.channels {
+		defs[channelRecordType(c.Name)] = typeDoc(channelRecordDoc(c))
+	}
 	eachOwnNode(gp.tree, func(n *rnode) {
 		add(n.prefix, n.output)
 		addStdin(n.prefix, n.inputs)
@@ -268,9 +283,9 @@ type pathFromClaim struct {
 	env     string
 }
 
-// variables are the claim's environment variables, comma-separated, first preferred: the
-// flag's own, then the env input's.
-func (c pathFromClaim) variables() string {
+// variables are the claim's environment variables, first preferred: the flag's own, then the
+// env input's.
+func (c pathFromClaim) variables() []string {
 	var out []string
 	for _, names := range []string{c.flagEnv, c.env} {
 		for v := range strings.SplitSeq(names, ",") {
@@ -279,7 +294,7 @@ func (c pathFromClaim) variables() string {
 			}
 		}
 	}
-	return strings.Join(out, ",")
+	return out
 }
 
 // collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON

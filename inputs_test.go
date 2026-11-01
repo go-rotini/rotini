@@ -53,7 +53,7 @@ func ovDef() Definition {
 // InputReader.Read and InputsWithReport's merged value.
 func TestCollect(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: from-file\n  token: from-file-token\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "from-env")
 
 	newRtx := func() *Context {
@@ -90,13 +90,13 @@ func TestCollect(t *testing.T) {
 	if win, ok := report.Winner("App.Env.Region"); !ok || win.Layer != "env" || win.Raw != "from-env" {
 		t.Errorf("Winner(Region) = %+v ok=%v, want env/from-env", win, ok)
 	}
-	if win, ok := report.Winner("App.Config.Endpoint"); !ok || win.Layer != "files" {
+	if win, ok := report.Winner("App.Config.Endpoint"); !ok || win.Layer != "config" {
 		t.Errorf("Winner(Endpoint) = %+v ok=%v, want the files layer", win, ok)
 	}
 
 	// Validation parity: a required config value missing errors in both forms.
 	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
-	bareMeta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
+	bareMeta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: bare, Format: "yaml"}}}
 	rtx := NewContextFor(tbDef(), nil)
 	rtx.WithInputSettings(bareMeta)
 	if _, err := rtx.Inputs[tbInputs](); err == nil {
@@ -190,7 +190,7 @@ func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInp
 	if err != nil {
 		t.Fatalf("Defaults: %v", err)
 	}
-	files, err := rtx.FileInputs[ovInputs]()
+	files, err := rtx.ConfigInputs[ovInputs]()
 	if err != nil {
 		t.Fatalf("FileInputs: %v", err)
 	}
@@ -210,7 +210,7 @@ func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInp
 // sources vary.
 func TestOverlay_precedence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name      string
@@ -222,8 +222,8 @@ func TestOverlay_precedence(t *testing.T) {
 	}{
 		{"argv wins over all", []string{"--color", "green"}, "teal", true, "green", "argv"},
 		{"env over files and default", nil, "teal", true, "teal", "env"},
-		{"files over default", nil, "", true, "red", "files"},
-		{"default when no source", nil, "", false, "blue", "defaults"},
+		{"config over default", nil, "", true, "red", "config"},
+		{"default when no source", nil, "", false, "blue", "default"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -271,7 +271,7 @@ func TestOverlay_defaultsOnly(t *testing.T) {
 		"App.Config.Retries": "3",
 	} {
 		win, ok := rep.Winner(path)
-		if !ok || win.Layer != "defaults" || win.Raw != raw {
+		if !ok || win.Layer != "default" || win.Raw != raw {
 			t.Errorf("Winner(%s) = %+v (ok=%v), want defaults/%q", path, win, ok, raw)
 		}
 	}
@@ -284,7 +284,7 @@ func TestOverlay_defaultsOnly(t *testing.T) {
 // value — disjoint fields from different layers all survive the merge.
 func TestOverlay_skipNotZero(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  retries: 5\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(ovDef(), []string{"--out", "report.txt"})
@@ -305,7 +305,7 @@ func TestOverlay_skipNotZero(t *testing.T) {
 	for path, layer := range map[FieldPath]string{
 		"App.Flags.Out":      "argv",
 		"App.Env.Region":     "env",
-		"App.Config.Retries": "files",
+		"App.Config.Retries": "config",
 	} {
 		if win, ok := rep.Winner(path); !ok || win.Layer != layer {
 			t.Errorf("Winner(%s) = %+v (ok=%v), want layer %q", path, win, ok, layer)
@@ -368,7 +368,7 @@ func TestOverlay_handBuiltLayer(t *testing.T) {
 // the winner last; Fields enumerates everything any layer set, sorted.
 func TestOverlay_report(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("APP_COLOR", "teal")
 
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
@@ -379,7 +379,7 @@ func TestOverlay_report(t *testing.T) {
 	for _, p := range hist {
 		layers = append(layers, p.Layer)
 	}
-	if want := []string{"defaults", "files", "env", "argv"}; !reflect.DeepEqual(layers, want) {
+	if want := []string{"default", "config", "env", "argv"}; !reflect.DeepEqual(layers, want) {
 		t.Errorf("History layers = %v, want %v", layers, want)
 	}
 	if hist[len(hist)-1].Raw != "green" {
@@ -484,7 +484,7 @@ func TestOverlay_validateRequiredAcrossLayers(t *testing.T) {
 // caught by the merged validation, exactly like InputReader.Read's locus.
 func TestOverlay_validateEnumOnFileSuppliedFlag(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: magenta\n") // not in the enum
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(ovDef(), nil)
 	got, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
@@ -531,7 +531,7 @@ func TestOverlay_stdinLayer(t *testing.T) {
 // machinery: on identical inputs they must produce identical structs.
 func TestOverlay_bindEquivalence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: cfg-secret\n  retries: 5\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "eu-central")
 
 	cases := []struct {
@@ -665,11 +665,11 @@ func ExampleMergeInputsWithReport() {
 // map bind element-wise, an env list splits on its separator, and a bad value is an error.
 func TestOverlay_flagFallbacksMatchTheInputReader(t *testing.T) {
 	cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v}\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbListDef(), nil)
 	rtx.WithInputSettings(meta)
-	files, err := rtx.FileInputs[tbListInputs]()
+	files, err := rtx.ConfigInputs[tbListInputs]()
 	if err != nil {
 		t.Fatalf("FileInputs: %v", err)
 	}
@@ -755,7 +755,7 @@ func acEntryPoints(rtx *Context) map[string]error {
 	_, ea := rtx.ArgvInputs[acDeep]()
 	_, ed := rtx.DefaultInputs[acDeep]()
 	_, ee := rtx.EnvInputs[acDeep]()
-	_, ef := rtx.FileInputs[acDeep]()
+	_, ef := rtx.ConfigInputs[acDeep]()
 	return map[string]error{
 		"Inputs": ec, "InputsWithReport": ep, "ArgvInputs": ea,
 		"Defaults": ed, "EnvInputs": ee, "FileInputs": ef,
@@ -796,7 +796,7 @@ func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
 		_, ea := rtx.ArgvInputs[acOwn]()
 		_, ed := rtx.DefaultInputs[acOwn]()
 		_, ee := rtx.EnvInputs[acOwn]()
-		_, ef := rtx.FileInputs[acOwn]()
+		_, ef := rtx.ConfigInputs[acOwn]()
 		errs = map[string]error{
 			"Inputs": ec, "InputsWithReport": ep, "ArgvInputs": ea,
 			"Defaults": ed, "EnvInputs": ee, "FileInputs": ef,
@@ -826,7 +826,7 @@ func describeErr(err error) string {
 // precedence matrix.
 func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	withFiles := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	withFiles := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	for _, c := range []struct {
 		name string
@@ -895,7 +895,7 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 func TestCollect_isIdempotent(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
-	rtx.WithInputSettings(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	rtx.WithInputSettings(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	first, err1 := rtx.Inputs[ovInputs]()
 	second, err2 := rtx.Inputs[ovInputs]()

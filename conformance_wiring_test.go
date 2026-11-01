@@ -69,7 +69,7 @@ func wiringConformanceCases() []wiringCase {
 		// WIRE-05: a config_source flag's declared default names another user's home.
 		{
 			id: "WIRE-05", feature: "user-homes", ctor: "UserHomes()", def: expand,
-			meta: InputSettings{ConfigFiles: []ConfigFile{{
+			meta: InputSettings{ConfigFiles: []ConfigFileDef{{
 				Name: "app", Format: "yaml", PathFrom: &PathFromDef{Flag: "config"},
 			}}},
 			inputs: typesOf(wpInputs{}),

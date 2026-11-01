@@ -88,7 +88,7 @@ func runChdir(t *testing.T, base string, argv ...string) (chdirSeen, int, string
 		}
 	}}
 	var errb bytes.Buffer
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
 	p := NewProgramFunc(chdirDef(), fnLookup(fns)).WithInputSettings(meta).
 		WithEnviron([]string{"HOME=" + base}).WithDir(base).WithoutSignalHandling().
 		WithStdout(&bytes.Buffer{}).WithStderr(&errb)

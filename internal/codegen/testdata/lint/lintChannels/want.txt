@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:12:13: command demo channel "warning": "warning" is reserved (info, success, warning, error, panic, schema_version); choose another name
+spec: .rotini.spec.yaml:15:13: command demo channel "skipped": is declared twice (also channels[0]); a channel is known by its name
+spec: .rotini.spec.yaml:20:15: command demo channel "word": a record is a JSON object: give the schema `type: object` and its properties, or `$ref` an object schema
+spec: .rotini.spec.yaml:23:15: command demo channel "conflict": an error channel's record needs a required, non-nullable string property `message`: its generated Error method returns it, so the record can join the run's error

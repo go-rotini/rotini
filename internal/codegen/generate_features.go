@@ -80,7 +80,7 @@ var (
 	// completionFeatureDesc is keyed by shell, with no doc-data, template or verbatim page.
 	// Scripts come from completionScript.
 	completionFeatureDesc = docFeature{
-		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
+		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "CompletionScript",
 		ext: ".txt", filePrefix: "completion_", perShell: true,
 	}
 )
@@ -111,9 +111,9 @@ type cmdHelp struct {
 	Header      string
 	Footer      string
 	Headings    *HelpHeadings
-	Examples    []string
+	Examples    []Example         // command.examples, either form read as {run, summary}
 	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
-	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	SeeAlso     []seeAlsoEntry    // command.see_also
 	Groups      []HelpGroup       // command.groups: descriptions and order of its pages' group headings
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
@@ -130,7 +130,7 @@ func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
+		Examples: examplesOf(c.Examples), ExitStatus: c.ExitStatus, SeeAlso: seeAlsoOf(c.SeeAlso), Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 		Stability: c.Stability, Topics: c.Topics,
 		Effects: c.Effects, Agent: c.Agent, Metadata: c.Metadata,
@@ -160,16 +160,31 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			d.Stdin = stdinDocFor(inputs, gp.schemas)
 		}
 		d.PageName = manPageName(gp.rootName, names)
+		d.SeeAlsoRows = seeAlsoRows(d.seeAlso, gp.rootName, gp.rootDisplay)
+		d.SeeAlso = seeAlsoTexts(d.SeeAlsoRows)
 		d.Section = section
 		d.Source = gp.rootDisplay
 		d.Date = date
 		if len(names) > 0 {
-			d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, names[:len(names)-1]))
+			d.ParentPage = manPageName(gp.rootName, names[:len(names)-1])
+			d.RelatedPages = append(d.RelatedPages, d.ParentPage)
 		}
+		pages := map[string]string{}
 		for _, c := range children {
 			if !c.hidden {
-				d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, append(slices.Clone(names), c.name)))
+				pages[c.name] = manPageName(gp.rootName, append(slices.Clone(names), c.name))
+				d.RelatedPages = append(d.RelatedPages, pages[c.name])
 			}
+		}
+		for i := range d.CommandGroups {
+			for j := range d.CommandGroups[i].Commands {
+				row := &d.CommandGroups[i].Commands[j]
+				row.Page = pages[row.Name]
+			}
+		}
+		d.Files = gp.filesOf(names, d)
+		for i := range d.Configuration {
+			d.Configuration[i].File = gp.pinnedFileName(names, d.Configuration[i].pinned)
 		}
 		return d
 	}
@@ -190,7 +205,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		out[0].data.Environment = append(out[0].data.Environment, completionEnvRows(gp.conf)...)
 	}
 	out[0].data.Stability = gp.rootHelp.Stability
-	out[0].data.Topics = topicRows(gp.rootHelp.Topics)
+	out[0].data.Topics = topicRows(gp)
 	if rf := gp.responseFiles(); rf != nil {
 		out[0].data.ResponseFiles = rf.Prefix
 	}
@@ -214,9 +229,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				data.Deprecated = withReplacement(n.deprecated, n.replacedBy.text)
 				data.DeprecatedSince, data.RemovedIn = n.lifecycle.since, n.lifecycle.removedIn
 			}
-			if len(data.ExitStatus) == 0 {
-				data.ExitStatus = out[0].data.ExitStatus // the root's exit_status is program-wide
-			}
+			data.ExitStatus = exitRows(effectiveExitStatus(n.help.ExitStatus, gp.rootHelp.ExitStatus)) // the root's exit_status is program-wide
 			data.Stability = leastStable(stability, n.help.Stability)
 			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
@@ -235,6 +248,11 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}
 	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true, gp.rootHelp.Stability)
 	out = append(out, topicNodes(gp, feat, section, date)...)
+	for i := range out {
+		d := &out[i].data
+		d.SeeAlsoRows = uniqueSeeAlsoRows(d.SeeAlsoRows, feat.listedPages(*d))
+		d.SeeAlso = seeAlsoTexts(d.SeeAlsoRows)
+	}
 	if feat.name == manFeatureDesc.name || feat.name == markdownFeatureDesc.name {
 		for i := range out {
 			withStructuredDefaults(&out[i].data)
@@ -243,13 +261,31 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	return out
 }
 
+// listedPages returns the pages this feature's built-in page cross-references beside its
+// see_also entries: man pages list RelatedPages, markdown pages the parent's page, help none.
+func (f docFeature) listedPages(d templateHelpData) []string {
+	switch {
+	case f.manPages:
+		return d.RelatedPages
+	case f.name == markdownFeatureDesc.name && d.ParentPage != "":
+		return []string{d.ParentPage}
+	}
+	return nil
+}
+
 // stabilityRank orders stability markers from least to most stable; "" is stable.
-var stabilityRank = map[string]int{"experimental": 0, "beta": 1, "": 2}
+func stabilityRank() map[string]int {
+	return stabilityRankOnce.value(func() map[string]int {
+		return map[string]int{"experimental": 0, "beta": 1, "": 2}
+	})
+}
+
+var stabilityRankOnce lazy[map[string]int]
 
 // leastStable returns the less stable of two stability markers: an item is never more stable
 // than the command it belongs to.
 func leastStable(a, b string) string {
-	if stabilityRank[b] < stabilityRank[a] {
+	if stabilityRank()[b] < stabilityRank()[a] {
 		return b
 	}
 	return a
@@ -318,7 +354,7 @@ func completionNodes() []helpNode {
 // resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Files: "Files:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:", SeeAlso: "See Also:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -334,11 +370,13 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Flags, o.Flags)
 	override(&hd.Environment, o.Environment)
 	override(&hd.Configuration, o.Configuration)
+	override(&hd.Files, o.Files)
 	override(&hd.Cascading, o.Cascading)
 	override(&hd.Examples, o.Examples)
 	override(&hd.Output, o.Output)
 	override(&hd.Stdin, o.Stdin)
 	override(&hd.Topics, o.Topics)
+	override(&hd.SeeAlso, o.SeeAlso)
 	return hd
 }
 
@@ -355,12 +393,13 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Usage:       h.Usage,
 		Footer:      h.Footer,
 		Cascading:   withConfigKeys(unshadowed(ancestorCascading, ownFlags(inputs, false)), reads),
-		Examples:    h.Examples,
-		SeeAlso:     h.SeeAlso,
+		Examples:    exampleRuns(h.Examples),
+		ExampleRows: exampleRows(h.Examples),
+		seeAlso:     h.SeeAlso,
 		Effects:     effectsText(h.Effects),
-	}
-	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
+		Metadata:    h.Metadata,
+		FlagRules:   flagRules(inputs),
+		ExitStatus:  exitRows(effectiveExitStatus(h.ExitStatus, nil)),
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
@@ -378,6 +417,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Group:      c.group,
 			Deprecated: withReplacement(deprecated, c.replacedBy.text),
 			Stability:  c.help.Stability,
+			Metadata:   c.help.Metadata,
 
 			DeprecatedSince: c.lifecycle.since, RemovedIn: c.lifecycle.removedIn,
 		})
@@ -413,7 +453,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Summary:     e.Summary,
 				Description: e.Description,
 				Stability:   e.Stability,
-				Type:        flagDisplayType(e.Schema),
+				Metadata:    e.Metadata,
+				Type:        envDisplayType(e.Schema),
 				Required:    e.Schema != nil && e.Schema.Required,
 				Default:     schemaDefaultString(e.Schema),
 				defaultJSON: structuredDefault(e.Schema),
@@ -431,26 +472,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if c.Hidden {
 				continue
 			}
-			constraints, rules := constraintText(c.Schema, "config")
-			d.Configuration = append(d.Configuration, templateDocConfigRow{
-				Name:        c.Name,
-				Location:    configLocation(c),
-				Summary:     c.Summary,
-				Description: c.Description,
-				Stability:   c.Stability,
-				Type:        flagDisplayType(c.Schema),
-				Required:    c.Schema != nil && c.Schema.Required,
-				Default:     schemaDefaultString(c.Schema),
-				defaultJSON: structuredDefault(c.Schema),
-				Enum:        enumOf(c.Schema),
-				EnumValues:  enumValuesOf(c.Schema),
-				Deprecated:  c.Deprecated,
-				Constraints: constraints,
-				Accepts:     acceptsNote(c.Schema),
-				Rules:       rules,
-
-				DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn,
-			})
+			d.Configuration = append(d.Configuration, configRow(c))
 		}
 	}
 	d.Flags = withConfigKeys(d.Flags, reads)
@@ -458,6 +480,45 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 	d.FlagGroups = groupFlags(d.Flags, h.Groups)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
+}
+
+// exitRows is an exit_status list as the EXIT STATUS section's rows.
+func exitRows(entries []ExitStatusEntry) []templateDocExitRow {
+	if len(entries) == 0 {
+		return nil
+	}
+	rows := make([]templateDocExitRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
+	}
+	return rows
+}
+
+// configRow is a configuration input's row on the help, man and markdown pages.
+func configRow(c ConfigInput) templateDocConfigRow {
+	constraints, rules := constraintText(c.Schema, "config")
+	return templateDocConfigRow{
+		Name:        c.Name,
+		Key:         configKey(c),
+		Location:    configLocation(c),
+		pinned:      configPinned(c),
+		Summary:     c.Summary,
+		Description: c.Description,
+		Stability:   c.Stability,
+		Metadata:    c.Metadata,
+		Type:        settingDisplayType(c.Schema),
+		Required:    c.Schema != nil && c.Schema.Required,
+		Default:     schemaDefaultString(c.Schema),
+		defaultJSON: structuredDefault(c.Schema),
+		Enum:        enumOf(c.Schema),
+		EnumValues:  enumValuesOf(c.Schema),
+		Deprecated:  c.Deprecated,
+		Constraints: constraints,
+		Accepts:     acceptsNote(c.Schema),
+		Rules:       rules,
+
+		DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn,
+	}
 }
 
 // argumentRow is an argument's row on the help, man and markdown pages.
@@ -472,6 +533,7 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 		Summary:     withSecretNote(withStreamNote(a.Summary, a.Schema), a.Schema),
 		Description: a.Description,
 		Stability:   a.Stability,
+		Metadata:    a.Metadata,
 		Required:    a.Schema != nil && a.Schema.Required,
 		Variadic:    isVariadicSchema(a.Schema),
 		Default:     schemaDefaultString(a.Schema),
@@ -498,10 +560,40 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 // space, first preferred.
 func envVarLabel(e EnvInput, envPrefix string) string {
 	label := strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
+	if e.Schema != nil && e.Schema.Nesting != "" {
+		// A family: one variable per key, so the row shows the name a user types.
+		var names []string
+		for n := range strings.SplitSeq(envVarName(e, envPrefix), ",") {
+			names = append(names, n+e.Schema.Nesting+"<KEY>")
+		}
+		label = strings.Join(names, ", ")
+	}
 	if e.Schema != nil && e.Schema.VariableFile != "" {
 		label += ", " + e.Schema.VariableFile + fileVariableNote
 	}
 	return label
+}
+
+// configPinned is the logical name of the one file a config input is read from, "" for none.
+func configPinned(c ConfigInput) string {
+	if c.Schema == nil {
+		return ""
+	}
+	return c.Schema.File
+}
+
+// pinnedFileName is the file called name, as a user names it, among those the command at names
+// (below the root) reads; "" when name is "" or no such file is in scope.
+func (gp *program) pinnedFileName(names []string, name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, cf := range gp.chainFiles(strings.Join(append([]string{gp.rootName}, names...), "/")) {
+		if cf.Name == name {
+			return fileDisplayName(cf.ConfigurationFile)
+		}
+	}
+	return ""
 }
 
 // configLocation returns where a config input is read from, for display: "<file>.<key>" when a
@@ -652,6 +744,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Summary:     withSecretNote(withStreamNote(f.Summary, f.Schema), f.Schema),
 		Description: f.Description,
 		Stability:   f.Stability,
+		Metadata:    f.Metadata,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
@@ -937,8 +1030,8 @@ func isVariadicSchema(schema *InputSchema) bool {
 }
 
 // flagDisplayType returns the value token shown after a flag's identifiers in docs: the
-// placeholder when set, else the display type name; "" for bool and count flags, which take no
-// value.
+// placeholder when set, else the value's label in the user's words (see valueLabel); "" for
+// bool and count flags, which take no value.
 func flagDisplayType(schema *InputSchema) string {
 	t := getSchemaType(schema)
 	if t == "bool" || (schema != nil && schema.Type == "count") {
@@ -947,16 +1040,31 @@ func flagDisplayType(schema *InputSchema) string {
 	if schema != nil && schema.Placeholder != "" {
 		return schema.Placeholder
 	}
-	if schema != nil && schema.Items != nil && schema.Items.Ref != "" {
-		return t // a list of named shapes: []Mount
-	}
-	if schema != nil && schema.Ref == "" && schema.Type != "" {
-		if jsonSchemaTypeToGo(schema.Type) == "[]string" && schema.Items != nil && schema.Items.Ref == "" && schema.Items.Type != "" {
-			return "[]" + helpTypeName(schema.Items.Type)
+	if schema != nil && schema.Ref == "" && schema.Type != "" && (schema.Items == nil || schema.Items.Ref == "") {
+		if jsonSchemaTypeToGo(schema.Type) == "[]string" && schema.Items != nil && schema.Items.Type != "" {
+			return valueLabel("[]" + schema.Items.Type)
 		}
-		return helpTypeName(schema.Type)
+		return valueLabel(schema.Type)
 	}
-	return t
+	return valueLabel(t)
+}
+
+// envDisplayType is flagDisplayType for an env input: a family of variables (`nesting`) reads
+// one variable per key, so its row shows the name pattern alone and no type.
+func envDisplayType(schema *InputSchema) string {
+	if schema != nil && schema.Nesting != "" {
+		return ""
+	}
+	return settingDisplayType(schema)
+}
+
+// settingDisplayType is flagDisplayType for an env or config input, where a bool is written
+// out as a value (true or false) and so is named.
+func settingDisplayType(schema *InputSchema) string {
+	if getSchemaType(schema) == "bool" && (schema == nil || schema.Placeholder == "") {
+		return "bool"
+	}
+	return flagDisplayType(schema)
 }
 
 // valueTypeAliases are the rotini type names that name a kind of value (a duration, a URL, a
@@ -969,19 +1077,72 @@ var valueTypeAliases = []string{
 	"regexp", "glob",
 }
 
-// helpTypeName renders a declared type for docs: value aliases as written, everything else
-// resolved to Go, recursing into list and map types (`[]bytesize`, `map[string]duration`).
-func helpTypeName(t string) string {
+// valueLabel names a declared type for docs in the user's words, never a Go type: `string`,
+// `int` (any signed integer), `uint` (any unsigned one), `number` (a float), a value type as
+// written (`duration`, `url`), `file` and `dir` for paths, a repeated value as `<label>...`
+// (`string...`), a map as `key=<label>` (`key=value` for strings and any), and `value` for a
+// type of the author's own (`model.Link`). A named shape from `schemas:` keeps its name.
+func valueLabel(t string) string {
+	t = strings.TrimPrefix(t, "*")
 	if elem, ok := strings.CutPrefix(t, "[]"); ok {
-		return "[]" + helpTypeName(elem)
+		return valueLabel(elem) + "..."
 	}
-	if key, val, ok := splitMapType(t); ok {
-		return "map[" + helpTypeName(key) + "]" + helpTypeName(val)
+	if t == "array" {
+		return "string..."
+	}
+	if _, val, ok := splitMapType(t); ok {
+		return "key=" + mapValueLabel(val)
+	}
+	if t == "map" || t == "object" {
+		return "key=value"
 	}
 	if slices.Contains(valueTypeAliases, t) {
 		return t
 	}
-	return jsonSchemaTypeToGo(t)
+	for alias, goType := range valueTypeGo() {
+		if strings.TrimPrefix(goType, "*") == t && slices.Contains(valueTypeAliases, alias) {
+			return canonicalAlias(alias)
+		}
+	}
+	switch t {
+	case "string", "":
+		return "string"
+	case "bool", "boolean":
+		return "bool"
+	case "int", "integer", "int8", "int16", "int32", "int64", "count":
+		return "int"
+	case "uint", "uint8", "uint16", "uint32", "uint64":
+		return "uint"
+	case "number", "float32", "float64":
+		return "number"
+	case "existingfile", "inputfile", "outputfile":
+		return "file"
+	case "existingdir":
+		return "dir"
+	case "any":
+		return "value"
+	}
+	if strings.Contains(t, ".") {
+		return "value" // a type of the author's own, which users know nothing of
+	}
+	return t
+}
+
+// mapValueLabel is a map value's label after `key=`: `value` for a string or any value.
+func mapValueLabel(t string) string {
+	if l := valueLabel(t); l != "string" {
+		return l
+	}
+	return "value"
+}
+
+// canonicalAlias picks one spelling for the value types that share a Go type: time, datetime
+// and date all read into time.Time, and docs call them `time`.
+func canonicalAlias(alias string) string {
+	if alias == "datetime" || alias == "date" {
+		return "time"
+	}
+	return alias
 }
 
 // schemaDefaultString returns the default docs show: default_text when set, else the default.

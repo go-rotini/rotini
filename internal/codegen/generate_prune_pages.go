@@ -22,7 +22,9 @@ type priorPages struct {
 	embedded   []string // absolute paths of the page files the cmd file embedded
 	manPages   []string // the man page names ManPages listed
 	manSection string   // ManSection, "" when the man feature was off
-	root       string   // the root command's name, which names the installed completion scripts
+	// markdownPages are the page names MarkdownPages listed.
+	markdownPages []string
+	root          string // the root command's name, which names the installed completion scripts
 }
 
 // readPriorPages reads the pages the previous generate wrote from the cmd file it left. It runs
@@ -45,7 +47,7 @@ func parsePriorPages(src, cmdDir string) priorPages {
 	if !containsLine(lines, generatedLine) {
 		return pp
 	}
-	inManPages := false
+	inManPages, inMarkdownPages := false, false
 	for i, line := range lines {
 		next := ""
 		if i+1 < len(lines) {
@@ -66,11 +68,17 @@ func parsePriorPages(src, cmdDir string) priorPages {
 			}
 		case strings.HasPrefix(line, "func ManPages() "):
 			inManPages = true
-		case inManPages && line == "}":
-			inManPages = false
+		case strings.HasPrefix(line, "func MarkdownPages() "):
+			inMarkdownPages = true
+		case (inManPages || inMarkdownPages) && line == "}":
+			inManPages, inMarkdownPages = false, false
 		case inManPages:
 			if name := manPagesEntry(line); name != "" {
 				pp.manPages = append(pp.manPages, name)
+			}
+		case inMarkdownPages:
+			if name := manPagesEntry(line); name != "" {
+				pp.markdownPages = append(pp.markdownPages, name)
 			}
 		}
 	}

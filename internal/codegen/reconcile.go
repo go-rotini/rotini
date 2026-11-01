@@ -105,6 +105,7 @@ type normalizer interface{ normalize() }
 func (s *Spec) normalize() {
 	expandFlagSets(s)
 	qualifySchemaRefs(reflect.ValueOf(s).Elem())
+	resolveExitStatusRefs(s)
 	resolveValuesFrom(s)
 	inheritScalarRefConstraints(s)
 	hoistItemConstraints(s)

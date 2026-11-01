@@ -246,23 +246,38 @@ type exitSubInputs struct {
 	Sub struct{ Flags, Arguments struct{} }
 }
 
-// Only the invoked command's own exit_status counts: a code its parent documents does not.
-func TestExitDocumented_ownListOnly(t *testing.T) {
+// A command without its own exit_status documents the root's; its own list replaces the root's.
+func TestExitDocumented_inheritsRoot(t *testing.T) {
 	t.Parallel()
-	def := rotini.Definition{
-		Name: "ex", Handler: "Ex", ExitStatus: []rotini.ExitStatusDef{{Code: 4, Name: "root"}},
-		Commands: []rotini.CommandDef{{Name: "sub", Handler: "ExSub", Inputs: reflect.TypeFor[exitSubInputs]()}},
+	run := func(t *testing.T, own []rotini.ExitStatusDef) rotinitest.Result {
+		t.Helper()
+		def := rotini.Definition{
+			Name: "ex", Handler: "Ex", ExitStatus: []rotini.ExitStatusDef{{Code: 4, Name: "root"}},
+			Commands: []rotini.CommandDef{{Name: "sub", Handler: "ExSub", Inputs: reflect.TypeFor[exitSubInputs](), ExitStatus: own}},
+		}
+		p := rotini.NewProgramFunc(def, func(string) (rotini.Handler, bool) {
+			return &handler{run: func(rtx *rotini.Context) { rtx.HaltWithCode(4) }}, true
+		})
+		res := rotinitest.Run(t, p, exitSubInputs{})
+		if res.Code != 4 {
+			t.Fatalf("exit %d, want 4", res.Code)
+		}
+		return res
 	}
-	p := rotini.NewProgramFunc(def, func(string) (rotini.Handler, bool) {
-		return &handler{run: func(rtx *rotini.Context) { rtx.HaltWithCode(4) }}, true
+	t.Run("inherited", func(t *testing.T) {
+		t.Parallel()
+		res := run(t, nil)
+		if msg := failure(t, func(tb testing.TB) { rotinitest.ExitDocumented(tb, res) }); msg != "" {
+			t.Errorf("failure = %q, want the root's code to count", msg)
+		}
 	})
-	res := rotinitest.Run(t, p, exitSubInputs{})
-	if res.Code != 4 {
-		t.Fatalf("exit %d, want 4", res.Code)
-	}
-	if msg := failure(t, func(tb testing.TB) { rotinitest.ExitDocumented(tb, res) }); !strings.Contains(msg, "ex sub exited 4, and declares no exit_status") {
-		t.Errorf("failure = %q, want the parent's code not to count", msg)
-	}
+	t.Run("own list replaces the root's", func(t *testing.T) {
+		t.Parallel()
+		res := run(t, []rotini.ExitStatusDef{{Code: 5}})
+		if msg := failure(t, func(tb testing.TB) { rotinitest.ExitDocumented(tb, res) }); !strings.Contains(msg, "ex sub exited 4, which its exit_status doesn't list (5)") {
+			t.Errorf("failure = %q, want the root's code not to count", msg)
+		}
+	})
 }
 
 // Each run gets a fresh working directory of its own.

@@ -56,16 +56,16 @@ import (
 )
 
 func closest(typed string, candidates []string) string {
-	best, _ := rotini.NewSuggestor().Closest(typed, candidates)
+	best, _ := rotini.NewSuggester().Closest(typed, candidates)
 	return best
 }
 
-// Report prints each error and two suggestions for it: the Suggestor's, and closest's.
+// Report prints each error and two suggestions for it: the Suggester's, and closest's.
 func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	for _, err := range out.Errors {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 -- suggest.go.txt --
-if hits := rotini.NewSuggestor().For(err); len(hits) > 0 {
+if hits := rotini.NewSuggester().For(err); len(hits) > 0 {
 	fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
 }
 -- rank.go.txt --

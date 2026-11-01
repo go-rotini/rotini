@@ -10,42 +10,38 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniMountHandler)(nil)
+var _ rotini.HandlerE = (*rotiniMountHandler)(nil)
 
 type rotiniMountHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniMountHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniMountHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniMountInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	flags := inputs.RotiniMount.Flags
 	specs := inputs.RotiniMount.Arguments.Specs
 	if len(specs) == 0 && !flags.Prune {
-		rtx.HaltWith(rotini.UsageError(errors.New("name a spec to mount, or pass --prune")))
-		return
+		return rotini.UsageError(errors.New("name a spec to mount, or pass --prune"))
 	}
 	if err := notDirectories(flags.Into); err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 
 	rtx.SetDependencyIfAbsent(mountDep, codegen.Mount)
-	res, err := rtx.MustGetDependency(mountDep)(flags.Into, specs, codegen.MountOptions{
+	res, err := rtx.MustDependency(mountDep)(flags.Into, specs, codegen.MountOptions{
 		Under:  strings.Fields(flags.Under),
 		Group:  flags.Group,
 		Prune:  flags.Prune,
 		DryRun: flags.DryRun,
 	})
 	if err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 
 	verb := map[bool][2]string{false: {"mounted", "removed"}, true: {"would mount", "would remove"}}[flags.DryRun]
@@ -67,13 +63,13 @@ func (*rotiniMountHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		where, len(res.Mounted), verb[0], len(res.Already), len(res.Removed), verb[1]))
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(rtx.Stdout, line); err != nil {
-			haltWithWriteError(rtx, err)
-			return
+			return writeError(err)
 		}
 	}
 	if flags.DryRun && res.Changed() {
 		rtx.HaltWithCode(exitWouldChange)
-		return
+		return nil
 	}
 	rtx.HaltWithCode(0)
+	return nil
 }

@@ -14,9 +14,12 @@ exec rotini explain version
 stdout '^spec: version$'
 stdout '^conf: version$'
 
+# A key that isn't one is a usage error against the command, like any other bad input.
 wantexit 1 rotini explain command.flags.schema.nope
-stderr 'no key "nope" under command\.flags\.schema'
+stderr '^Error: rotini explain: no key "nope" under command\.flags\.schema'
 ! stdout .
+wantexit 1 rotini explain nope.key
+stderr '^Error: rotini explain: no key "nope" under the document.s top'
 
 exec rotini __complete explain command.fla
 stdout '^command\.flags\.$'

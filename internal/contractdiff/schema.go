@@ -213,6 +213,9 @@ func (doc *document) definitionUse(level func(c *command, e *input) stability) m
 			mark(out, c, nil, stripLocal(e.Output))
 		}
 	}
+	for _, ch := range doc.Channels {
+		mark(out, doc.channelUser(ch), nil, stripLocal(ch.Schema))
+	}
 	return uses
 }
 

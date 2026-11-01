@@ -8,7 +8,7 @@ title: "specification"
 
 # .rotini.spec.yaml
 
-The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.
+The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. The keys marked Root only (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) are valid only on the root command, and `$schema` is an optional key for editor tooling.
 
 {{< code title="every key" language="yaml" file="examples/rotini.spec.yaml" open="true" copy="true" >}}{{< /code >}}
 
@@ -29,7 +29,7 @@ The minimum rotini version this spec requires (X.Y.Z): the feature set it was wr
 
 [`Command`](#command) · **required**
 
-The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-command-level keys `env_prefix` and `schemas` live here.
+The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-only keys (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) live here.
 
 ### `$schema`
 
@@ -40,7 +40,7 @@ Optional URI identifying the rotini spec schema, for editor tooling only: rotini
 
 ## Command
 
-A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
+A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The root-only keys (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 
 ### Identity and visibility
 
@@ -114,7 +114,7 @@ How settled this command is. 'experimental': it may change or be removed in any 
 
 `object`
 
-Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no page (help, man, markdown, completion). It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
+Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no default page (help, man, markdown, completion); an editable page template reads them as `.Metadata`. It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
 
 ### Inputs
 
@@ -303,21 +303,27 @@ Root only: the name the generated help, man and markdown pages show for the prog
 
 #### `examples`
 
-array of `string`
+array of `string` or [`Example`](#example)
 
-Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument). A page given verbatim leaves them out.
+Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. Each is a command line (`taskr list --status open`), or an object with the line as `run` and a one-line `summary`, which the pages show as a `# summary` line above it. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument); it warns about one that uses a deprecated command, flag, alias or value, a hidden alias or identifier, or a literal value for a secret input. The contract lists each example with the words it passes to the program, the MCP tool definitions carry them as input examples, and the generated cmd package lists them in `Examples` for a test to run. A page given verbatim leaves them out.
 
 #### `exit_status`
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The contract records each command's own list. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. An entry is a code written out (`{code: 3, name: not_found, summary: no such task}`), a `$ref` to one of the root command's named `exit_statuses` (`{$ref: not_found}`), or `{inherit: true}`. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below. A command's own list replaces the root's, unless it holds `{inherit: true}`: the root's entries then stand in that item's place, less any code the command lists itself, so a command that needs one more code writes `[{inherit: true}, {code: 4, summary: conflict}]` rather than copying the root's list. The same list is what the contract records for the command (marked `exit_status_inherited` when it holds the root's entries), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses; with the conf's `validate.exit_status_one`, it also warns about a command's own list that leaves out 1, the code every recorded error exits with, and with `validate.exit_status_drops_root`, about a command's own list, without `inherit: true`, that leaves out a code the root lists. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+
+#### `exit_statuses`
+
+`object`
+
+Root only: reusable exit statuses, keyed by snake_case name, which a command's `exit_status` lists by reference (`- $ref: not_found`, or `- $ref: '#/exit_statuses/not_found'`) instead of writing the entry out again. Each takes the keys of an `exit_status` entry except `name`: its key is its name. A named exit status documents nothing until a command lists it, the root included, and a command that lists one documents it as if written out there, its constant included. A composed spec's references name its own `exit_statuses`.
 
 #### `see_also`
 
-array of `string`
+array of `string` or [`SeeAlso`](#seealso)
 
-Cross-references rendered as a SEE ALSO section in the man and markdown pages (e.g. related commands or man pages like 'rotini-generate(1)', or URLs); the man page also links the parent and sub-commands. A page given verbatim ('man' or 'markdown') leaves it out.
+Cross-references rendered as a See Also section in the help, man and markdown pages; the man page also links the parent and sub-commands, and the markdown page the parent. Each is text written as it is shown (another program's man page like 'git(1)', or a note), or one of the program's own pages or a URL as an object: `{command: remote add}` names a command by its path below the root, `{topic: filters}` a help topic, and `{url: https://example.com/docs}` a link. Each page shows a reference in its own form: help the command line (`taskr remote add`, `taskr help filters`) or the URL, man the page name and section (`taskr-remote-add(1)`), markdown a link to the page (`[taskr remote add](taskr-remote-add.md)`) or the URL. In a spec composed with `$ref`, a command path is below that spec's own root. `rotini validate` warns about a command or topic the program doesn't have. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 
 #### `group`
 
@@ -379,7 +385,7 @@ Root only: help topics, pages that aren't commands. `<program> help <topic>` sho
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to one of the root's named `schemas`, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
 
 #### `output_stream`
 
@@ -391,7 +397,13 @@ When true, the command writes a stream of items rather than one value, and `outp
 
 `object`
 
-Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
+Root only: reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
+
+#### `channels`
+
+array of [`Channel`](#channel)
+
+Root only: the program's own outcome channels, each a kind of record a handler hands the reporter with `rtx.Record`, beside the built-in infos, successes, warnings and errors. Each becomes a generated record type `<Name>Record` and a channel handle `<Name>Channel` (the name PascalCased) in the cmd package, the type in the models package when the conf declares one. rotini.StructuredReporter writes each record as its own line, `{"schema_version":1,"<name>":{...}}`, and the contract lists the channels, so a record's shape is part of the contract `rotini diff` compares.
 
 ### Generated code
 
@@ -504,7 +516,7 @@ A single dash and one digit (`-4`) declares a digit option, on a bool or count f
 
 `object`
 
-Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 
 ### `removed_in`
 
@@ -522,7 +534,7 @@ With `deprecated`: the flag to use instead, as one of its identifiers (`--output
 
 `string` · one of `force`, `chdir`, `fields`, `sort`, `dry-run`, `confirm`, `machine-output`, `page`
 
-What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
+What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.OutputOverwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
 
 'chdir' is the one role the runtime acts on: a directory flag like git's `-C dir`, spelled with whatever identifiers the flag declares (`-C`, `-w, --workdir` or any other): a `string` or `existingdir` flag on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), not short-circuit, in no flag group or dependency, one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
 
@@ -601,7 +613,7 @@ When true, the argument is omitted from generated help (it still parses on the c
 
 `object`
 
-Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 
 ### `passthrough`
 
@@ -676,7 +688,7 @@ When true, the input is omitted from generated help (it is still bound).
 
 `object`
 
-Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 
 ### `removed_in`
 
@@ -745,7 +757,7 @@ When true, the input is omitted from generated help (it is still bound).
 
 `object`
 
-Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 
 ### `removed_in`
 
@@ -776,11 +788,11 @@ Short one-liner shown next to this input in the generated Environment/Configurat
 
 ### `format`
 
-`string` · one of `json`, `yaml`, `jsonc`, `toml`, `text`, `lines`, `jsonl`, `bytes` · default `json`
+`string` · default `json`
 
 How the piped stdin payload is read, and the Go type of the generated Stdin field.
 
-The four document formats (json, yaml, jsonc, toml) decode it into the generated &lt;Prefix&gt;Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json.
+The four document formats (json, yaml, jsonc, toml) decode it into the generated &lt;Prefix&gt;Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json. Any other name (`format: ini`) is a document format of the program's own, decoded the same way by the codec the program adds with `WithFeatures(rotini.Codec("ini", decode))`; `rotini validate` warns about a name that isn't built in, and a run that reads stdin without the codec fails with a WiringError naming `rotini.Codec("ini", …)`.
 
 'jsonl' reads JSON Lines: one JSON record per line, blank lines skipped, each checked against the schema, which describes one record. The field is `*[]<Prefix>Stdin`, or with `stream: true` an iterator, `iter.Seq2[<Prefix>Stdin, error]`. An error names the line it was found on.
 
@@ -792,7 +804,7 @@ One leading UTF-8 byte-order mark is removed before the payload is read, in ever
 
 `object`
 
-Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 
 ### `schema`
 
@@ -841,9 +853,11 @@ Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or
 
 ### `format`
 
-`string` · one of `json`, `yaml`, `toml`, `jsonc`, `dotenv`
+`string`
 
-The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. The built-in formats are json, yaml, toml, jsonc and dotenv. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+
+Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. SetConfigValue writes such a file only when the codec has an encoder (`rotini.CodecEncode`), which rewrites the whole file. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
 
 ### `path`
 
@@ -861,7 +875,7 @@ Named sets of settings in this file, one chosen per run by a declared input (`--
 
 [`Schema`](#schema)
 
-Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
+Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). The root's named `schemas` resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 
 
 ## FlagGroup
@@ -990,9 +1004,17 @@ Executable-name prefix to discover: a file name, so it holds no '/' or '\'. Defa
 
 ## ExitStatusEntry
 
+One entry of a command's `exit_status`: a code written out (with `code`), a named exit status (`$ref`), or the root's list (`inherit: true`).
+
+### `$ref`
+
+`string`
+
+A named exit status under the root command's `exit_statuses`, by its name (`$ref: not_found`) or as a pointer (`$ref: '#/exit_statuses/not_found'`). The two mean the same. The entry is the named one, with its key as its `name`, so nothing else may sit beside `$ref`; to change a summary for one command, write its entry out. Resolved when you generate, against the spec file the reference is written in.
+
 ### `code`
 
-`integer` · **required**
+`integer`
 
 The exit status code being documented (0-255 — the range a process can actually return).
 
@@ -1001,6 +1023,12 @@ The exit status code being documented (0-255 — the range a process can actuall
 `string`
 
 An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
+
+### `inherit`
+
+`boolean`
+
+`inherit: true`, alone in its item, puts the root command's exit_status in this list at this point, less any code the list gives itself, so the command documents the root's codes and its own. Not valid on the root command, and at most once per list.
 
 ### `name`
 
@@ -1084,6 +1112,12 @@ Heading rendered above the environment section of the generated help page. Rende
 
 Heading rendered above the examples section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Examples:".
 
+### `files`
+
+`string`
+
+Heading rendered above the Files section, which lists the configuration files a command's inputs are read from, in the order they win. Rendered verbatim — include any trailing ':' you want. Default: "Files:".
+
 ### `flags`
 
 `string`
@@ -1095,6 +1129,12 @@ Heading rendered above the flags section of the generated help page. Rendered ve
 `string`
 
 Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
+
+### `see_also`
+
+`string`
+
+Heading rendered above the See Also section (`see_also:`) of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "See Also:".
 
 ### `stdin`
 
@@ -1139,14 +1179,22 @@ The topic's text, paragraphs separated by blank lines. Set exactly one of `body`
 
 ### `generate`
 
-`string` · one of `environment`
+`string` · one of `environment`, `configuration`
 
-Build the topic's text from the spec. 'environment' lists every environment variable the program reads: env inputs, flag fallbacks, config_source and variable_file names, the completion switches the conf declares, and the XDG variables config discovery reads, each with the commands that read it. Set exactly one of `body` and `generate`.
+Build the topic's text from the spec. 'environment' lists every environment variable the program reads: env inputs, flag fallbacks, config_source and variable_file names, the completion switches the conf declares, and the XDG variables config discovery reads, each with the commands that read it. 'configuration' lists every configuration file the program reads, in the order they win, then every key its inputs read from them (configuration inputs and flag and argument fallbacks), each with the commands that read it. Set exactly one of `body` and `generate`.
 
 
 ## Schema
 
 JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
+
+### `additionalProperties`
+
+`boolean` or `null`
+
+On an object schema with `properties`: `false` makes any other key an error, so a configuration file's typo (`replicaz: 3` beside `replicas`) is reported instead of ignored. `true`, like leaving it out, allows other keys. It applies to the object it is written on, not to the objects in its properties; write it on each one that should be closed.
+
+Checked wherever the shape is checked: configuration files, stdin payloads, object flags and output checks. In a configuration file the error names the file, line and column and the keys that are allowed, and is an InputError of kind unknown-key whose Token and Candidates are the key and the declared keys, for a reporter that suggests the nearest. Rejected beside `$ref` (write it on the named schema), on a schema that is not an object, and on one with no `properties`, which would allow no key at all. To warn about unread keys rather than refuse them, a handler reads InputReport.UnreadConfigKeys.
 
 ### `const`
 
@@ -1171,6 +1219,35 @@ The generated &lt;Prefix&gt;Output is then an interface that only the kinds' typ
 array of `string`
 
 Required property names for object schemas (standard JSON Schema semantics). On an output shape, each must be one of its `properties`, or no output could pass.
+
+
+## Channel
+
+One outcome channel: a name, a class and the shape of its records.
+
+### `name`
+
+`string` · **required**
+
+The channel's name, unique among the program's channels and not a built-in outcome (info, success, warning, error, panic) or `schema_version`. It names the structured line (`{"skipped":{...}}`) and, PascalCased, the generated SkippedRecord type and SkippedChannel handle.
+
+### `class`
+
+`string` · **required** · one of `info`, `success`, `warning`, `error`
+
+How rotini treats the records when the program's reporter doesn't: info, success and warning records print where infos, successes and warnings print; error records are failures, which print with the errors and count toward the exit code, `rtx.Failed()` and the error Run returns. An error channel's schema must declare a required string property `message`: the generated type's Error method returns it.
+
+### `schema`
+
+[`Schema`](#schema) · **required**
+
+The shape of one record: an object schema, written here or a `$ref` to a named one (`type SkippedRecord File`). The generated record type is built from it, the structured line carries the record as this JSON object, and the contract carries the schema.
+
+### `summary`
+
+`string`
+
+What one record means, one line. It becomes the doc comment of the generated type and handle, and the contract carries it.
 
 
 ## Effects
@@ -1535,6 +1612,8 @@ The object form also takes `aliases` (other spellings accepted and bound as the 
 
 On an argument, a value or alias starting with `-` reads as a flag unless typed after `--`, though completion offers it before; `rotini validate` warns about one.
 
+`rotini generate` writes a constant for each value of a string input (`TaskrListFormatJSON = "json"`, named for the command, the input and the value) and of a string schema under `schemas` (`StatusOpen Status = "open"`), with the value's summary as its doc comment and `Deprecated:` for a deprecated value.
+
 ### `exclusiveMaximum`
 
 `number` or `string` or `null`
@@ -1647,9 +1726,9 @@ Value types parse a kind of value and generate the matching Go field:
 - 'glob' — rotini.Glob, a path.Match pattern checked when parsed (`*`, `?`, `[a-z]`, `\` escapes) with a Match method; `**` is not recursive. It keeps the pattern as a value; `glob: true` instead expands a pattern into file names
 - 'existingfile' / 'existingdir' — a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: cleaning, following symlinks and creating a missing file are the handler's policy, and `~` and `$VAR` are expanded only when the input declares `expand`. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()
 - 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'
-- 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'
+- 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.OutputOverwrite(true). Help adds '(- for stdout)'
 
-A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. The path types (existingfile, existingdir, inputfile, outputfile) show as `string`, the type of their field. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
+A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'). Help, man and markdown name every type in the user's words, never as a Go type: a value type as written ('--limit bytesize'), any integer as `int` (`uint` when unsigned), a float as `number`, the path types as `file` (existingfile, inputfile, outputfile) or `dir` (existingdir), a list as its item's label and `...` (`string...`), a map as `key=` and its value's label (`key=value`, `key=duration`), and a type of your own as `value`; a `placeholder` replaces the label. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
 
 Shapes that change how a flag is written:
 
@@ -1689,6 +1768,21 @@ Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'j
 `string`
 
 A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place.
+
+
+## Example
+
+### `run`
+
+`string` · **required**
+
+The command line, written as a user types it (`taskr list --status open`).
+
+### `summary`
+
+`string`
+
+What the example does, on one line. The help, man and markdown pages and the skill page show it as a `# summary` line above the command line.
 
 
 ## FlagSet
@@ -1732,11 +1826,69 @@ What the set is for, for the spec's readers; it isn't shown on any page.
 
 `string`
 
-An invoked name starting with this answers shell completion for the root instead of running it: the arguments are the words to complete, as kubectl passes them to a `kubectl_complete-<plugin>` executable. The answer is written in the format Program.WithCompletion sets, else rotini.PluginCompletion, the plugin hosts' format.
+An invoked name starting with this answers shell completion for the root instead of running it: the arguments are the words to complete, as kubectl passes them to a `kubectl_complete-<plugin>` executable. The answer is written in the format Program.WithCompletionFormat sets, else rotini.PluginCompletion, the plugin hosts' format.
 
 ### `prefix`
 
 `string`
 
 Stripped from the invoked name before it is matched against the root's commands: with 'acme-', a binary run as acme-ls runs `ls`. A name without the prefix runs the root.
+
+
+## NamedExitStatus
+
+A reusable exit status under the root's `exit_statuses`: an `exit_status` entry without `name`, since its key names it.
+
+### `code`
+
+`integer` · **required**
+
+The exit status code being documented (0-255 — the range a process can actually return).
+
+### `docs_url`
+
+`string`
+
+An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
+
+### `output`
+
+[`Schema`](#schema)
+
+The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
+
+### `retryable`
+
+`boolean` · default `false`
+
+When true, running the same command again may succeed (a timeout, a busy lock). Carried into the contract for agents and other callers that decide whether to retry; rotini itself never retries.
+
+### `summary`
+
+`string`
+
+What this exit code means.
+
+
+## SeeAlso
+
+A cross-reference to one of the program's own commands or help topics, or to a URL. Exactly one key is set.
+
+### `command`
+
+`string`
+
+A command, by the names on its path below the root, separated by spaces.
+
+### `topic`
+
+`string`
+
+A help topic the root declares in `topics:`, by name.
+
+### `url`
+
+`string`
+
+An absolute http or https link.
 

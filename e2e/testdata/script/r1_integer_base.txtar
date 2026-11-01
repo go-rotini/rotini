@@ -13,7 +13,7 @@ exec go mod tidy
 exec go build -o perm$exe ./cmd/perm
 
 exec ./perm$exe --help
-stdout '--mode uint32 .*\(default 0o644\).*\(accepts 0x, 0o and 0b prefixes\)'
+stdout '--mode uint .*\(default 0o644, .*accepts 0x, 0o and 0b prefixes\)'
 
 # Each prefix, a decimal value with a leading zero, and the default.
 exec ./perm$exe --mode 0o755 --mask 0xFF --n 010
@@ -33,7 +33,7 @@ stderr '--mode must be <= 511 \(got 0o1000\)'
 ! exec ./perm$exe --n 1__0
 stderr '--n: "1__0" is not a valid integer'
 ! exec ./perm$exe --mask 0x100
-stderr '--mask: "0x100" is not a valid uint8 \(out of range: 0 to 255\)'
+stderr '--mask: "0x100" is not a valid non-negative integer \(out of range: 0 to 255\)'
 
 -- cmd/perm/.rotini.spec.yaml --
 version: 0.0.0

@@ -37,16 +37,16 @@ func TestSuggestionFacts_inputError(t *testing.T) {
 		t.Setenv("MODE", "fats")
 		err := bind(t, InputSettings{})
 		check(t, err, "fats", []string{"fast", "slow"})
-		if got := NewSuggestor().For(err); len(got) == 0 || got[0] != "fast" {
+		if got := NewSuggester().For(err); len(got) == 0 || got[0] != "fast" {
 			t.Errorf("For = %v, want fast first", got)
 		}
 	})
 	t.Run("config", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: gold1\n")
-		check(t, bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}), "gold1", []string{"gold", "silver"})
+		check(t, bind(t, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}), "gold1", []string{"gold", "silver"})
 	})
 	t.Run("other failures carry none", func(t *testing.T) {
-		err := usageBind(channelEnv, "PORT", "PORT is required", nil)
+		err := usageBind(InputErrorKindMissingRequired, channelEnv, "PORT", "PORT is required", nil)
 		if err.Token != "" || err.Candidates != nil {
 			t.Fatalf("a non-enum *InputError carries facts: %#v", err)
 		}
@@ -86,7 +86,7 @@ func TestSuggestionFacts_pluginError(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Name != "gnerate" || !slices.Equal(pe.Candidates, want) {
 		t.Fatalf("err = %#v, want a *PluginError for gnerate with Candidates %v", err, want)
 	}
-	if got := NewSuggestor().For(err); len(got) == 0 || got[0] != "generate" {
+	if got := NewSuggester().For(err); len(got) == 0 || got[0] != "generate" {
 		t.Errorf("For = %v, want generate first", got)
 	}
 
@@ -219,6 +219,6 @@ func FuzzSuggestionFacts(f *testing.F) {
 		if ok && (got != token || got == "[redacted]" || len(gotCandidates) == 0) {
 			t.Fatalf("SuggestionFacts = %q, %v for token %q", got, gotCandidates, token)
 		}
-		_ = NewSuggestor().For(err)
+		_ = NewSuggester().For(err)
 	})
 }

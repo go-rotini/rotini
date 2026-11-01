@@ -151,3 +151,41 @@ func bound(v any) *float64 {
 	}
 	return &f
 }
+
+// examplesOf reads a command's `examples:`, each a command line or an object with `run` and
+// `summary`. An entry of neither shape, which validation rejects, is left out.
+func examplesOf(list []any) []Example {
+	out := make([]Example, 0, len(list))
+	for _, e := range list {
+		switch v := e.(type) {
+		case string:
+			out = append(out, Example{Run: v})
+		case map[string]any:
+			run, _ := v["run"].(string)
+			summary, _ := v["summary"].(string)
+			out = append(out, Example{Run: run, Summary: summary})
+		case Example:
+			out = append(out, v)
+		case *Example:
+			if v != nil {
+				out = append(out, *v)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// exampleRuns returns the command lines of examples.
+func exampleRuns(examples []Example) []string {
+	if len(examples) == 0 {
+		return nil
+	}
+	out := make([]string, len(examples))
+	for i, e := range examples {
+		out[i] = e.Run
+	}
+	return out
+}

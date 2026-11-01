@@ -107,8 +107,8 @@ func envOnlySettings(meta InputSettings) InputSettings {
 	return meta
 }
 
-func envOnlyFiles(files []ConfigFile) []ConfigFile {
-	return slices.DeleteFunc(slices.Clone(files), func(f ConfigFile) bool { return f.As != "env" })
+func envOnlyFiles(files []ConfigFileDef) []ConfigFileDef {
+	return slices.DeleteFunc(slices.Clone(files), func(f ConfigFileDef) bool { return f.As != "env" })
 }
 
 // fallbackPathCounts counts the chosen fallback passes of the "direct" runs by the path each

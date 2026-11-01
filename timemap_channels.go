@@ -24,7 +24,7 @@ func (s spellings) timeMapValue(key string, v recon.Value) (recon.Value, bool) {
 	parent, _, cut := strings.Cut(key, ".")
 	if ts, ok := s.keys.timeMaps[parent]; ok && cut && v.Kind() == recon.StringKind {
 		ts.clock = s.clock
-		t, err := parseTimeValue(v.String(), ts)
+		t, err := parseTime(v.String(), ts)
 		if err != nil {
 			return v, false
 		}
@@ -47,7 +47,7 @@ func timeMapOf(v recon.Value, ts timeSpec) (recon.Value, bool) {
 			if !ok {
 				return v, false // checkEnvMaps reports a malformed pair
 			}
-			t, err := parseTimeValue(strings.TrimSpace(text), ts)
+			t, err := parseTime(strings.TrimSpace(text), ts)
 			if err != nil {
 				return v, false
 			}
@@ -63,7 +63,7 @@ func timeMapOf(v recon.Value, ts timeSpec) (recon.Value, bool) {
 				out[k] = e.Any()
 				continue
 			}
-			t, err := parseTimeValue(e.String(), ts)
+			t, err := parseTime(e.String(), ts)
 			if err != nil {
 				return v, false
 			}

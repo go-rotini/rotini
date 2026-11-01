@@ -1,0 +1,46 @@
+.TH "OPS\-CONFIGURATION" 1 "" "ops" "Miscellaneous"
+.SH NAME
+ops\-configuration \- the configuration files and keys ops reads
+.SH FILES
+The first file listed that sets a key supplies it.
+.TP
+\fI~/.ops.yaml\fR
+A configuration file.
+.TP
+\fI\&.ops.yaml\fR
+in the working directory or the nearest parent holding one
+.TP
+\fI\&./secrets.json\fR
+or the file \-\-secrets names; profiles under "stages", chosen by \-\-stage
+(default dev)
+.SH CONFIGURATION
+.TP
+\fBdeploy.registry\fR \fIstring\fR
+the registry to push to (in \&.ops.yaml, used by: ops deploy)
+.TP
+\fBdeploy.replicas\fR \fIint\fR
+how many to run (default 1, used by: ops deploy)
+.TP
+\fBdeploy.retries\fR \fIint\fR
+how many times to retry (default 1, used by: ops deploy)
+.br
+between 0 and 9
+.TP
+\fBprofile\fR \fIstring\fR
+the output profile (used by: ops) [short|long]
+.RS
+.RS 2
+\fBshort\fR \- one line each
+.br
+\fBlong\fR \- every field
+.RE
+.RE
+.TP
+\fBregion\fR \fIstring\fR
+the default region (beta, used by: ops)
+.sp
+The region commands use when none is given.
+.br
+must look like eu\-1
+.SH "SEE ALSO"
+\fBops\fR(1)

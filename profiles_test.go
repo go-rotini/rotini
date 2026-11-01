@@ -67,7 +67,7 @@ profiles:
 
 // pfProfiles is the profiles block the tests' file declares, unless a test replaces it.
 func pfProfiles() *ProfilesDef {
-	return &ProfilesDef{Under: "profiles", Flag: "profile", Env: "APP_PROFILE", Default: "default"}
+	return &ProfilesDef{Under: "profiles", Flag: "profile", Env: []string{"APP_PROFILE"}, Default: "default"}
 }
 
 func pfWrite(t *testing.T, dir, name, body string) string {
@@ -82,10 +82,10 @@ func pfWrite(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-func pfSettings(files ...ConfigFile) InputSettings { return InputSettings{ConfigFiles: files} }
+func pfSettings(files ...ConfigFileDef) InputSettings { return InputSettings{ConfigFiles: files} }
 
-func pfFileAt(path string) ConfigFile {
-	return ConfigFile{Name: "app", Path: path, Profiles: pfProfiles()}
+func pfFileAt(path string) ConfigFileDef {
+	return ConfigFileDef{Name: "app", Path: path, Profiles: pfProfiles()}
 }
 
 func pfContext(dir string, env []string, meta InputSettings, argv ...string) *Context {
@@ -272,7 +272,7 @@ func TestProfiles_schemaChecksTheEffectiveView(t *testing.T) {
 		t.Fatalf("default: %v", err)
 	}
 	_, err := pfRead(t, nil, pfSettings(f), "--profile", "bad")
-	if err == nil || !strings.Contains(err.Error(), "configuration file "+path+" (profile bad) is invalid") {
+	if err == nil || !strings.Contains(err.Error(), "configuration file "+path+":17:16 (profile bad) is invalid") {
 		t.Fatalf("bad: %v", err)
 	}
 }
@@ -282,8 +282,8 @@ func TestProfiles_unionAcrossFiles(t *testing.T) {
 	project := pfWrite(t, dir, "project.yaml", "profiles:\n  dev: {region: dev-r}\n")
 	user := pfWrite(t, dir, "user.yaml", "profiles:\n  prod: {region: prod-r}\n")
 	files := pfSettings(
-		ConfigFile{Name: "app", Path: project, Profiles: pfProfiles()},
-		ConfigFile{Name: "user", Path: user, Profiles: pfProfiles()},
+		ConfigFileDef{Name: "app", Path: project, Profiles: pfProfiles()},
+		ConfigFileDef{Name: "user", Path: user, Profiles: pfProfiles()},
 	)
 	// A profile only one file defines is not an error.
 	in, err := pfRead(t, nil, files, "--profile", "prod")
@@ -309,7 +309,7 @@ func TestProfiles_configSourceAndDiscover(t *testing.T) {
 
 	home := t.TempDir()
 	pfWrite(t, home, filepath.Join("xdg", "acme", "config.yaml"), "profiles:\n  prod: {region: xdg-prod}\n")
-	xdg := ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"}, Profiles: pfProfiles()}
+	xdg := ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"}, Profiles: pfProfiles()}
 	env := []string{"XDG_CONFIG_HOME=" + filepath.Join(home, "xdg"), "APP_PROFILE=prod"}
 	in, err = pfRead(t, env, pfSettings(xdg))
 	if err != nil || in.App.Flags.Region != "xdg-prod" {
@@ -321,7 +321,7 @@ func TestProfiles_configSourceAndDiscover(t *testing.T) {
 	if err := os.MkdirAll(work, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	walk := ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "walk-up", File: ".acme.yaml"}, Profiles: pfProfiles()}
+	walk := ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "walk-up", File: ".acme.yaml"}, Profiles: pfProfiles()}
 	meta := pfSettings(walk)
 	var got pfInputs
 	if err := NewInputReader(meta).Read(pfContext(work, []string{"APP_PROFILE=prod"}, meta), &got); err != nil || got.App.Flags.Region != "walk-prod" {
@@ -333,7 +333,7 @@ func TestProfiles_dotenvSelects(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", pfFile)
 	pfWrite(t, dir, ".env", "APP_PROFILE=prod\n")
-	meta := pfSettings(pfFileAt(path), ConfigFile{Name: "dotenv", Path: ".env", Format: "dotenv", As: "env"})
+	meta := pfSettings(pfFileAt(path), ConfigFileDef{Name: "dotenv", Path: ".env", Format: "dotenv", As: "env"})
 	var in pfInputs
 	if err := NewInputReader(meta).Read(pfContext(dir, nil, meta), &in); err != nil || in.App.Flags.Region != "prod-r" {
 		t.Fatalf("region = %q, %v", in.App.Flags.Region, err)
@@ -345,7 +345,7 @@ func TestProfiles_envInputSelector(t *testing.T) {
 	// flag reports the profile in use.
 	path := pfWrite(t, t.TempDir(), "app.yaml", pfFile)
 	f := pfFileAt(path)
-	f.Profiles.Env = "APP_PROFILE,ACME_PROFILE"
+	f.Profiles.Env = []string{"APP_PROFILE", "ACME_PROFILE"}
 	in, err := pfRead(t, []string{"ACME_PROFILE=prod"}, pfSettings(f))
 	if err != nil || in.App.Flags.Region != "prod-r" || in.App.Flags.Profile != "prod" {
 		t.Fatalf("region %q profile %q, %v", in.App.Flags.Region, in.App.Flags.Profile, err)
@@ -380,7 +380,7 @@ func TestProfiles_report(t *testing.T) {
 func TestConfigProfiles(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", pfFile)
-	meta := pfSettings(pfFileAt(path), ConfigFile{Name: "plain", Path: path})
+	meta := pfSettings(pfFileAt(path), ConfigFileDef{Name: "plain", Path: path})
 	names, err := ConfigProfiles(pfContext(dir, nil, meta), "app")
 	if err != nil || !slices.Equal(names, []string{"bad", "default", "prod"}) {
 		t.Fatalf("names = %v, %v", names, err)

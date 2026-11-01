@@ -102,7 +102,7 @@ func renderProfiles(b *strings.Builder, gp *program, f scopedConfigFile) {
 		fmt.Fprintf(b, ", Flag: %q", sel.flag.Name)
 	}
 	if vars := sel.variables(gp.envPrefix); len(vars) > 0 {
-		fmt.Fprintf(b, ", Env: %q", strings.Join(vars, ","))
+		fmt.Fprintf(b, ", Env: %s", goStringSlice(vars))
 	}
 	if d := sel.defaultFor(p); d != "" {
 		fmt.Fprintf(b, ", Default: %q", d)

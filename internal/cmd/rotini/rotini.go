@@ -26,12 +26,12 @@ var (
 	pseudoVersionRe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`) })
 )
 
-var _ rotini.Handler = (*rotiniHandler)(nil)
+var _ rotini.HandlerE = (*rotiniHandler)(nil)
 
 type rotiniHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 // releaseVersion returns v's bare X.Y.Z when v names a release, or "" for an empty string,
@@ -63,11 +63,10 @@ func ResolveVersion(ldflagVersion string) string {
 	return "0.0.0"
 }
 
-func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 
 	if inputs.Rotini.Flags.Help {
@@ -78,29 +77,29 @@ func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) 
 
 		page, err := Help(path...)
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
-			haltWithWriteError(rtx, err)
-			return
+			return writeError(err)
 		}
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
 
 	if inputs.Rotini.Flags.Version {
 		if _, err := fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version()); err != nil {
-			haltWithWriteError(rtx, err)
-			return
+			return writeError(err)
 		}
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
+
+	return nil
 }
 
-func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }

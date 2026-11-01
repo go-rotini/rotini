@@ -76,28 +76,19 @@ const (
 	exitNotFound      = 127
 )
 
-// Report prints warnings and errors to stderr, points at help after a usage error, and sets the
-// exit code from the first error.
+// Report prints the default report, points at help after a usage error, and sets the exit
+// code from the first error, unless the run already set one.
 func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
-	if ctx.Err() != nil {
+	rotini.DefaultReporter(ctx, rtx, out)
+	if !out.Failed() || out.Signal != nil {
 		return // stopped by a signal: keep the 128+n exit code the run already set
-	}
-	for _, w := range out.Warnings {
-		fmt.Fprintln(rtx.Stderr, "Warning:", w)
-	}
-	for _, err := range out.Errors {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
-	}
-	for _, p := range out.Panics {
-		fmt.Fprintln(rtx.Stderr, "Error:", p)
-	}
-	if !out.Failed() {
-		return
 	}
 	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
 		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for usage.\n", rtx.CommandPath())
 	}
-	rtx.Exit(exitCode(out))
+	if out.ExitCode == 0 {
+		rtx.Exit(exitCode(out))
+	}
 }
 
 func exitCode(out rotini.Outcome) int {

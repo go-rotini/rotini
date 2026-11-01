@@ -272,7 +272,7 @@ type cfgInputs struct {
 	}
 }
 
-func readCfgName(t *testing.T, rtx *Context, files ...ConfigFile) string {
+func readCfgName(t *testing.T, rtx *Context, files ...ConfigFileDef) string {
 	t.Helper()
 	var in cfgInputs
 	if err := NewInputReader(InputSettings{ConfigFiles: files}).Read(rtx, &in); err != nil {
@@ -320,16 +320,16 @@ func TestInjectedDir_configFiles(t *testing.T) {
 	tests := []struct {
 		name string
 		rtx  *Context
-		file ConfigFile
+		file ConfigFileDef
 		want string
 	}{
-		{"walk-up from the run's directory", ctx(), ConfigFile{Name: "p", Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"}}, "walk-up"},
-		{"xdg from the run's home", ctx(homeEnv), ConfigFile{Name: "u", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}}, "xdg-home"},
-		{"xdg from the run's XDG_CONFIG_HOME", ctx("XDG_CONFIG_HOME=" + filepath.Join(root, "xdg")), ConfigFile{Name: "u", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}}, "xdg"},
-		{"a relative path", ctx(), ConfigFile{Name: "l", Path: "local.yaml"}, "relative"},
-		{"$VAR in a path", ctx("CFG_DIR=" + filepath.Join(root, "vars")), ConfigFile{Name: "v", Path: "$CFG_DIR/app.yaml"}, "var"},
-		{"~ in a path", ctx(homeEnv), ConfigFile{Name: "t", Path: "~/tilde.yaml"}, "tilde"},
-		{"config_source variable", ctx("APP_CONFIG=../../override.yaml"), ConfigFile{Name: "o", Path: "none.yaml", PathFrom: &PathFromDef{Env: "APP_CONFIG"}}, "override"},
+		{"walk-up from the run's directory", ctx(), ConfigFileDef{Name: "p", Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"}}, "walk-up"},
+		{"xdg from the run's home", ctx(homeEnv), ConfigFileDef{Name: "u", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}}, "xdg-home"},
+		{"xdg from the run's XDG_CONFIG_HOME", ctx("XDG_CONFIG_HOME=" + filepath.Join(root, "xdg")), ConfigFileDef{Name: "u", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}}, "xdg"},
+		{"a relative path", ctx(), ConfigFileDef{Name: "l", Path: "local.yaml"}, "relative"},
+		{"$VAR in a path", ctx("CFG_DIR=" + filepath.Join(root, "vars")), ConfigFileDef{Name: "v", Path: "$CFG_DIR/app.yaml"}, "var"},
+		{"~ in a path", ctx(homeEnv), ConfigFileDef{Name: "t", Path: "~/tilde.yaml"}, "tilde"},
+		{"config_source variable", ctx("APP_CONFIG=../../override.yaml"), ConfigFileDef{Name: "o", Path: "none.yaml", PathFrom: &PathFromDef{Env: []string{"APP_CONFIG"}}}, "override"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -359,7 +359,7 @@ func TestInjectedDir_argvPaths(t *testing.T) {
 	}
 	var in inputs
 	rtx := NewContextFor(def, []string{"--token", "@token.txt", "--manifest", "token.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err != nil {
+	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if in.App.Flags.Token != "s3cret" || in.App.Flags.Manifest != "token.txt" {
@@ -367,11 +367,11 @@ func TestInjectedDir_argvPaths(t *testing.T) {
 	}
 
 	rtx = NewContextFor(def, []string{"--token", "@missing.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `"missing.txt"`) {
+	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `"missing.txt"`) {
 		t.Errorf("Parse(@missing.txt) = %v, want the path as typed", err)
 	}
 	rtx = NewContextFor(def, []string{"--manifest", "missing.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err == nil {
+	if err := NewParser().Parse(rtx, &in); err == nil {
 		t.Error("Parse(--manifest missing.txt) succeeded")
 	}
 
@@ -433,7 +433,7 @@ func TestInjectedEnv_plugins(t *testing.T) {
 	if !slices.Equal(names, []string{"env", "local"}) {
 		t.Errorf("DiscoveredPlugins = %q, want env from the run's PATH and local from its plugin path", names)
 	}
-	if path, ok := cmd.PluginBinary("env"); !ok || path != filepath.Join(bin, "app-env") {
+	if path, ok := cmd.LookPlugin("env"); !ok || path != filepath.Join(bin, "app-env") {
 		t.Errorf("PluginBinary(env) = %q, %v", path, ok)
 	}
 	if got := complete(disc, []string{""}, nil, NewContextFor(disc, nil).WithEnviron([]string{"PATH=" + bin})); !slices.Contains(got, "env") {
@@ -513,7 +513,7 @@ func TestInjectedEnv_parallelPrograms(t *testing.T) {
 		mu.Unlock()
 	}}
 	def := Definition{Name: "app", Handler: "App"}
-	settings := InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: "app.yaml"}}}
+	settings := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Path: "app.yaml"}}}
 	for i := range 20 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()

@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:15:7: command demo: flag "quiet": has no `summary`, so help lists it with nothing beside it; add a one-line summary (validate.input_summaries)
+warning: spec: .rotini.spec.yaml:18:7: command demo: argument "target": has no `summary`, so help lists it with nothing beside it; add a one-line summary (validate.input_summaries)

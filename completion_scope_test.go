@@ -11,7 +11,7 @@ import (
 // mountedDef is a program with a cli mounted below it, the way a $ref composes one: the root
 // and the mounted kit each have a help command, and the root has topics.
 func mountedDef() Definition {
-	helpArg := []ArgDef{{Name: "command", Type: "[]string", Variadic: true, Complete: Completion{Kind: "command", Message: "a command"}}}
+	helpArg := []ArgDef{{Name: "command", Type: "[]string", Variadic: true, Complete: CompletionHint{Kind: "command", Message: "a command"}}}
 	return Definition{
 		Name: "app", Handler: "App",
 		Topics: []TopicDef{{Name: "filters", Summary: "how filters work"}},
@@ -67,7 +67,7 @@ func TestComplete_nothingMoreFits(t *testing.T) {
 		Commands: []CommandDef{
 			{Name: "status", Handler: "AppStatus"},
 			{Name: "logs", Handler: "AppLogs", Arguments: []ArgDef{{Name: "svc", Type: "string"}}},
-			{Name: "open", Handler: "AppOpen", Arguments: []ArgDef{{Name: "path", Type: "string", Complete: Completion{Kind: "file"}}}},
+			{Name: "open", Handler: "AppOpen", Arguments: []ArgDef{{Name: "path", Type: "string", Complete: CompletionHint{Kind: "file"}}}},
 		},
 	}
 	for _, tc := range []struct {
@@ -97,8 +97,8 @@ func valuesDef() Definition {
 			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
 			{Name: "env", Identifiers: []string{"-e", "--env"}, Type: "string", Enum: []string{"dev", "prod"}},
 			{Name: "tag", Identifiers: []string{"-t", "--tag"}, Type: "[]string", Separator: ",", Enum: []string{"blue", "green"}},
-			{Name: "token", Identifiers: []string{"--token"}, Type: "string", From: []string{"file"}, Complete: Completion{Kind: "none"}},
-			{Name: "dir", Identifiers: []string{"-C", "--dir"}, Type: "string", Complete: Completion{Kind: "directory"}},
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", From: []string{"file"}, Complete: CompletionHint{Kind: "none"}},
+			{Name: "dir", Identifiers: []string{"-C", "--dir"}, Type: "string", Complete: CompletionHint{Kind: "directory"}},
 		},
 		Arguments: []ArgDef{{Name: "src", Type: "string", From: []string{"file"}}},
 	}

@@ -26,7 +26,7 @@ import (
 // streamed field is an iterator over the run's one shared stream, read as the handler ranges
 // over it. A read of piped stdin ends when the run is canceled, or when the context the hook
 // holds ([Context.Context]) ends, with an [*InputError] whose cause is the cancellation's.
-func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
+func (r *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
 	sf, raw, ok := stdinTarget(v, waived)
 	if !ok {
 		return nil
@@ -39,7 +39,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argV
 		we.Command = path
 		return we
 	}
-	return fs.stdin.fill(b, rtx, sf, tag, argValues)
+	return fs.stdin.fill(r, rtx, sf, tag, argValues)
 }
 
 // stdinSubject names the running command's stdin in a wiring error.
@@ -49,7 +49,7 @@ func stdinSubject(rtx *Context) string {
 
 // bindStdin reads stdin into the leaf's Stdin field sf per its tag: everything fillStdin does
 // once it knows the field reads stdin.
-func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, argValues func(name string) ([]string, error)) error {
+func (r *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, argValues func(name string) ([]string, error)) error {
 	if skip, err := tag.fileGiven(argValues); skip || err != nil {
 		return err // the file argument is the input; stdin is not read
 	}
@@ -59,7 +59,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 	}
 
 	if tag.stream {
-		return b.bindStdinStream(rtx, sf, tag)
+		return r.bindStdinStream(rtx, sf, tag)
 	}
 
 	text, err := rtx.slurpStdin()
@@ -68,7 +68,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 	}
 	if text == "" {
 		if tag.required {
-			return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+			return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
@@ -76,7 +76,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 		return bindRawStdin(sf, tag, text)
 	}
 	if strings.HasPrefix(text, "\xff\xfe") || strings.HasPrefix(text, "\xfe\xff") {
-		return usageBind(channelStdin, "", "stdin is UTF-16 encoded; pipe UTF-8 instead", nil)
+		return usageBind(InputErrorKindMalformedDocument, channelStdin, "", "stdin is UTF-16 encoded; pipe UTF-8 instead", nil)
 	}
 
 	// A raw format binds the payload itself rather than decoding a document.
@@ -84,19 +84,19 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 		return bindRawStdin(sf, tag, text)
 	}
 	if tag.format == "jsonl" {
-		return bindJSONL(fs, sf, text, b.stdinSchemas, tag)
+		return bindJSONL(fs, sf, text, r.stdinSchemas, tag)
 	}
-	return b.bindStdinDocument(rtx, sf, tag.format, text)
+	return r.bindStdinDocument(rtx, sf, tag.format, text)
 }
 
 // bindStdinDocument decodes a stdin document into the Stdin field, checking it against the
 // command's stdin schema first.
-func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, text string) error {
+func (r *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, text string) error {
 	fs := rtx.features()
 	data := stripBOM([]byte(text))
-	js := b.stdinSchemas[sf.Type().Elem().Name()]
+	js := r.stdinSchemas[sf.Type().Elem().Name()]
 	c := fs.codec(format)
-	if c == nil && codecCtor(format) != "" {
+	if c == nil {
 		return missingCodec(format, stdinSubject(rtx)+" is "+format)
 	}
 	if js != "" && fs.schemas == nil {
@@ -106,9 +106,6 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 		return bindStdinValue(fs, sf, format, c, data, js)
 	}
 
-	if c == nil {
-		return internalBind(channelStdin, "", fmt.Sprintf("unsupported stdin format %q", format), nil)
-	}
 	m, err := c.codec().Decode(data)
 	if err != nil {
 		return stdinDecodeError(format, err)
@@ -121,7 +118,7 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 		}
 		if err := validator.Validate(m); err != nil {
 			if errors.Is(err, errSchemaUnfinished) {
-				return usageBind(channelStdin, "", stdinUnfinished, err)
+				return usageBind(InputErrorKindSchemaViolation, channelStdin, "", stdinUnfinished, err)
 			}
 			fs.schemas.patternMessages(js, err)
 			return reconBind(channelStdin, err)
@@ -145,13 +142,13 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 // bindStdinStream sets a streamed Stdin field to its iterator. Nothing is read here: with
 // nothing that can be piped (a terminal, or no reader) the field stays nil, or a required
 // stdin is a usage error.
-func (b *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinTag) error {
+func (r *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinTag) error {
 	if sf.Kind() != reflect.Func {
 		return internalBind(channelStdin, "", "a streamed stdin needs an iterator payload type", nil)
 	}
 	if !rtx.stdinState().piped() {
 		if tag.required {
-			return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+			return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 		}
 		return nil
 	}
@@ -169,7 +166,7 @@ func (b *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinT
 		if yieldType.NumIn() == 1 && yieldType.In(0).Kind() == reflect.Func && yieldType.In(0).NumIn() == 2 {
 			name = yieldType.In(0).In(0).Name()
 		}
-		fn, ok := rtx.streamJSONL(sf.Type(), tag, b.stdinSchemas[name])
+		fn, ok := rtx.streamJSONL(sf.Type(), tag, r.stdinSchemas[name])
 		if !ok {
 			return internalBind(channelStdin, "", "stdin format jsonl with stream needs an iter.Seq2[<record>, error] payload type", nil)
 		}
@@ -193,7 +190,7 @@ func bindStdinValue(fs *featureSet, sf reflect.Value, format string, c *codecEnt
 	}
 	ptr := reflect.New(sf.Type().Elem())
 	if err := json.Unmarshal(raw, ptr.Interface()); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("could not bind stdin: %s", jsonDecodeMessage(err)), err)
+		return usageBind(InputErrorKindInvalidValue, channelStdin, "", fmt.Sprintf("could not bind stdin: %s", jsonDecodeMessage(err)), err)
 	}
 	sf.Set(ptr)
 	return nil
@@ -206,7 +203,7 @@ func stdinDecodeError(format string, err error) error {
 	if line, col, ok := parsePosition(err); ok {
 		msg += fmt.Sprintf(" at line %d, column %d", line, col)
 	}
-	return usageBind(channelStdin, "", msg+": "+decodeMessage(err), err)
+	return usageBind(InputErrorKindMalformedDocument, channelStdin, "", msg+": "+decodeMessage(err), err)
 }
 
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.

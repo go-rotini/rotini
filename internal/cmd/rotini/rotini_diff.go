@@ -12,31 +12,29 @@ import (
 	"github.com/go-rotini/rotini/internal/contractdiff"
 )
 
-var _ rotini.Handler = (*rotiniDiffHandler)(nil)
+var _ rotini.HandlerE = (*rotiniDiffHandler)(nil)
 
 // diffDep is the codegen entry point the diff handler calls; see dependencies.go.
 var diffDep = rotini.NewDependency[codegen.DiffFn]("rotini.diff")
 
 type rotiniDiffHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniDiffInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	args := inputs.RotiniDiff.Arguments
 	flags := inputs.RotiniDiff.Flags
 	for _, source := range []string{args.Old, args.New} {
 		// git would read such a revision as one of its own options.
 		if strings.HasPrefix(source, "git:-") {
-			rtx.HaltWith(rotini.UsageError(fmt.Errorf("%s: a git revision can't start with '-'", source)))
-			return
+			return rotini.UsageError(fmt.Errorf("%s: a git revision can't start with '-'", source))
 		}
 	}
 
@@ -45,23 +43,20 @@ func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	spec, conf, err := codegen.ResolvePaths(flags.SpecFilePath, flags.ConfFilePath)
 	if err != nil {
 		if args.New == "" || flags.SpecFilePath != "" {
-			rtx.HaltWith(rotini.UsageError(err))
-			return
+			return rotini.UsageError(err)
 		}
 		spec, conf = "", flags.ConfFilePath
 	}
 
 	release, err := releaseOf(rtx, spec, conf, flags.Release)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 
 	rtx.SetDependencyIfAbsent(diffDep, codegen.NewProcessor(rtx.Version()).Diff)
-	report, err := rtx.MustGetDependency(diffDep)(spec, conf, args.Old, args.New, release)
+	report, err := rtx.MustDependency(diffDep)(spec, conf, args.Old, args.New, release)
 	if err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 
 	for _, a := range report.UnmatchedAccepts {
@@ -69,19 +64,18 @@ func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	var out RotiniDiffOutput
 	if err := convert(report, &out); err != nil {
-		rtx.HaltWith(rotini.InternalError(err))
-		return
+		return rotini.InternalError(err)
 	}
 	render := func(w io.Writer, _ string, _ RotiniDiffOutput) error { return report.WriteText(w) }
 	if err := rtx.WriteOutput(out, flags.Format, render); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if report.Failed(flags.FailOn) {
 		rtx.HaltWithCode(RotiniDiffExitBreaking)
-		return
+		return nil
 	}
-	rtx.HaltWithCode(RotiniDiffExitOk)
+	rtx.HaltWithCode(RotiniDiffExitOK)
+	return nil
 }
 
 // convert copies the report into the declared output type, which has the same JSON shape. Both

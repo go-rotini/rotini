@@ -54,7 +54,8 @@ func pruneEntrypoint(pl *planner, lay layout, keepList []string, remove bool, on
 // the first disables an orphan (see disableStub), and the next deletes the stub it disabled.
 // go generate lists every package's files before running any directive, so deleting a file
 // another package's directive is about to be handed would fail the run; a build-ignored file is
-// not on that list. Sub-directories, *_test.go files and hand-written files are never touched.
+// not on that list. Sub-directories, *_test.go files and hand-written files are never touched,
+// except a test seeded from stub_test_template, which goes with its handler file.
 // Every step is reported through onPrune. With remove false (init, which never deletes a file)
 // only the first step runs, and a stub already disabled is left as it is. A directory that
 // doesn't exist yet, as in a dry run before anything is written, has nothing to prune.
@@ -99,6 +100,9 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, remove bool,
 			if onPrune != nil {
 				onPrune(name)
 			}
+			if err := retireSeededTest(pl, dir, name, true, onPrune); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := pl.write(path, disableStub(body)); err != nil {
@@ -106,6 +110,9 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, remove bool,
 		}
 		if onPrune != nil {
 			onPrune(name + " (disabled; removed by the next generate)")
+		}
+		if err := retireSeededTest(pl, dir, name, false, onPrune); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -198,6 +205,10 @@ func buildIgnored(src []byte) bool {
 // identifies a file as rotini-written; deleting the line claims the file for the author.
 const stubMarker = "var _ rotini.Handler = ("
 
+// errorStubMarker is stubMarker for a stub seeded as a HandlerE
+// (templates/handler_error.go.tmpl).
+const errorStubMarker = "var _ rotini.HandlerE = ("
+
 // legacyStubMarker is stubMarker as written before v1.2.0, when the interface was Handlers.
 // Recognizing it keeps those stubs prunable after an upgrade.
 const legacyStubMarker = "var _ rotini.Handlers = ("
@@ -212,7 +223,13 @@ func stubLooksGenerated(path string) (bool, error) {
 		}
 		return false, fmt.Errorf("read %s to decide whether it is a generated stub: %w", path, err)
 	}
-	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), legacyStubMarker), nil
+	return hasStubMarker(body), nil
+}
+
+// hasStubMarker reports whether body carries a handler stub's marker line.
+func hasStubMarker(body []byte) bool {
+	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), errorStubMarker) ||
+		strings.Contains(string(body), legacyStubMarker)
 }
 
 // owns reports whether a file in the feature's embed_dir is one this feature writes, and so

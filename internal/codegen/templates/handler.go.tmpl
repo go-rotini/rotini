@@ -26,6 +26,13 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 		return
 	}
 	inputs := argv.Values
+{{- if or .RootHelpFlag .RootVersionFlag}}
+
+	if err := rtx.UnknownCommand(); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+{{- end}}
 {{- if .RootHelpFlag}}
 
 	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
@@ -141,11 +148,11 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{end}}
 {{- end}}
-{{- if .HelpPathArg}}
+{{- if .HelpPathArg}}{{if .HelpPlugins}}
 	if rtx.PluginHelp(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...) {
 		return
 	}
-
+{{end}}
 	page, err := rtx.HelpFor(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
 	if err != nil {
 		rtx.HaltWith(err)
@@ -179,14 +186,14 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{- else if and .PrintHelpWhenBare .NewShape}}
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
+	rtx.HaltWith(rotini.MissingCommandError(rtx))
 {{- else if .PrintHelpWhenBare}}
 	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 
-	rtx.HaltWithCode(1)
+	rtx.HaltWith(rotini.MissingCommandError(rtx))
 {{- else if .Redact}}
 	if _, err := fmt.Fprintln(rtx.Stdout, "{{.Invocation}}"); err != nil {
 		rtx.HaltWith(err)

@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:27:9: command demo/sync: exit_status replaces the root's and leaves out code 3, which the root lists; list it too, or add the root's with `inherit: true` (validate.exit_status_drops_root)
+warning: spec: .rotini.spec.yaml:32:9: command demo/run: exit_status replaces the root's and leaves out codes 1 and 3, which the root lists; list them too, or add the root's with `inherit: true` (validate.exit_status_drops_root)

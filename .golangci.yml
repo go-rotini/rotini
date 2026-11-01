@@ -45,6 +45,10 @@ linters:
     - err113
     - goconst
   settings:
+    dupword:
+      # `return nil, nil, err` in a doc-comment sample is Go, not a repeated word.
+      ignore:
+        - "nil,"
     cyclop:
       max-complexity: 25
     gocognit:
@@ -95,6 +99,8 @@ linters:
         # AsType returns (E, bool) with E constrained to error, so discarding the
         # value reads to errcheck as dropping an error. The bool IS the check.
         - errors.AsType
+        # Removing a temporary file after a failed write is best effort, as os.Remove is.
+        - (*github.com/go-rotini/rotini.osView).remove
     gosec:
       excludes:
         # Temporary output file names (createTemp) use math/rand deliberately: the

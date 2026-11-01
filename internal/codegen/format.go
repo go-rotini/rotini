@@ -26,7 +26,13 @@ const fmtIndent = 2
 
 // noReorder names keys whose mapping keeps the author's key order even though the schema
 // declares its properties: the order is the author's to choose.
-var noReorder = map[string]bool{"headings": true, "default": true}
+func noReorder() map[string]bool {
+	return noReorderOnce.value(func() map[string]bool {
+		return map[string]bool{"headings": true, "default": true}
+	})
+}
+
+var noReorderOnce lazy[map[string]bool]
 
 // FormatYAML returns src, a rotini spec, conf or composed command document in YAML, in
 // canonical form: keys in reading order (see fmtRanks), two-space indentation with
@@ -368,7 +374,7 @@ func (p *yamlPrinter) pair(pr *cfgedit.YAMLPair, col int, sch *fmtSchema, trail 
 		if err != nil {
 			return nil, err
 		}
-		if noReorder[pr.Key.Value] {
+		if noReorder()[pr.Key.Value] {
 			sch = nil
 		}
 		body, err := p.block(v, col+fmtIndent, sch, lead, trail)

@@ -23,7 +23,7 @@ func TestConfigMap_mergesPerEntryAcrossFiles(t *testing.T) {
 	dir := t.TempDir()
 	user := pfWrite(t, dir, "user.yaml", "labels: {tier: api}\ntags: {a: user}\n")
 	system := pfWrite(t, dir, "system.yaml", "labels: {team: core, tier: web}\ntags: {a: sys, b: sys}\n")
-	meta := pfSettings(ConfigFile{Name: "user", Path: user}, ConfigFile{Name: "system", Path: system})
+	meta := pfSettings(ConfigFileDef{Name: "user", Path: user}, ConfigFileDef{Name: "system", Path: system})
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "tags", Identifiers: []string{"--tag"}, Type: "map[string]string"}}}
 	rtx := NewContextFor(def, nil).WithDir(dir).WithInputSettings(meta)
 
@@ -46,7 +46,7 @@ func TestConfigMap_mergesPerEntryAcrossFiles(t *testing.T) {
 		t.Errorf("labels origin = %q", w.Origin)
 	}
 	h := rep.History("App.Config.Labels")
-	if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "files", Raw: "web", Origin: "config:system#labels.tier"}) {
+	if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "config", Raw: "web", Origin: "config:system#labels.tier"}) {
 		t.Errorf("history = %+v, want the system tier the user file overrode", h)
 	}
 }
@@ -57,7 +57,7 @@ func TestConfigMap_profileOverAnotherFile(t *testing.T) {
 	dir := t.TempDir()
 	app := pfWrite(t, dir, "app.yaml", pfFile)
 	system := pfWrite(t, dir, "system.yaml", "labels: {owner: ops, tier: sys}\n")
-	meta := pfSettings(pfFileAt(app), ConfigFile{Name: "system", Path: system})
+	meta := pfSettings(pfFileAt(app), ConfigFileDef{Name: "system", Path: system})
 	got, rep, err := pfContext(dir, nil, meta, "--profile", "prod").InputsWithReport[pfInputs]()
 	if err != nil {
 		t.Fatal(err)

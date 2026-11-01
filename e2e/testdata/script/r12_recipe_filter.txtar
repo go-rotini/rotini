@@ -81,20 +81,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*logsGrepHandler)(nil)
+var _ rotini.HandlerE = (*logsGrepHandler)(nil)
 
 type logsGrepHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[LogsGrepInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	g := in.LogsGrep
 	end := "\n"
@@ -115,11 +114,12 @@ func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
 				_, err = io.WriteString(rtx.Stdout, line+end)
 			}
 			if err != nil {
-				rtx.HaltWith(err)
-				return
+				return err
 			}
 		}
 	}
+
+	return nil
 }
 
 // readLines reads a file, or stdin for "-", a line at a time, without line ends.
@@ -152,3 +152,4 @@ generate:
     - type: cmd
       file: internal/cmd/logs/zz_logs.go
       package: logs
+      hook_returns: error

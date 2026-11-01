@@ -50,21 +50,21 @@ func TestUnixLayout_strict(t *testing.T) {
 }
 
 // A nil registered under an interface type reads back as registered.
-func TestGetDependency_nilInterface(t *testing.T) {
+func TestLookupDependency_nilInterface(t *testing.T) {
 	dep := NewDependency[io.Writer]("out")
 	rtx := NewContextFor(Definition{Name: "app"}, nil)
-	if _, ok := rtx.GetDependency(dep); ok {
+	if _, ok := rtx.LookupDependency(dep); ok {
 		t.Fatal("unregistered dependency reads as registered")
 	}
 	rtx.SetDependency(dep, nil)
-	if w, ok := rtx.GetDependency(dep); !ok || w != nil {
-		t.Fatalf("GetDependency = %v, %v; want nil, true", w, ok)
+	if w, ok := rtx.LookupDependency(dep); !ok || w != nil {
+		t.Fatalf("LookupDependency = %v, %v; want nil, true", w, ok)
 	}
-	if w := rtx.MustGetDependency(dep); w != nil {
-		t.Fatalf("MustGetDependency = %v, want nil", w)
+	if w := rtx.MustDependency(dep); w != nil {
+		t.Fatalf("MustDependency = %v, want nil", w)
 	}
 	other := NewDependency[*int]("out")
-	if _, ok := rtx.GetDependency(other); ok {
+	if _, ok := rtx.LookupDependency(other); ok {
 		t.Fatal("a nil interface reads as a *int")
 	}
 }

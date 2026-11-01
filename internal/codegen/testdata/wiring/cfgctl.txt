@@ -1,4 +1,5 @@
 rotini.Env()
+rotini.NestedEnv()
 rotini.ConfigFiles()
 rotini.Profiles()
 rotini.Fallbacks()

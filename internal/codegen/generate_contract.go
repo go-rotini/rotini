@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // This file emits the machine-readable contract: one JSON Schema file per declared output
@@ -34,6 +33,7 @@ type contractDoc struct {
 	ResponseFiles *contractResponseFiles `json:"response_files,omitempty"`
 	Multicall     *contractMulticall     `json:"multicall,omitempty"`
 	Topics        []contractTopic        `json:"topics,omitempty"` // the root's help topics
+	Channels      []contractChannel      `json:"channels,omitempty"`
 }
 
 // contractResponseFiles is how the program reads response files: a word starting with Prefix
@@ -76,8 +76,9 @@ type contractCommand struct {
 	PluginDiscovery       *contractPluginDiscovery `json:"plugin_discovery,omitempty"`
 	Parameters            map[string]any           `json:"parameters,omitempty"`
 	Output                any                      `json:"output,omitempty"`
-	Stream                bool                     `json:"stream,omitempty"` // output declares one item of a stream
-	ExitStatus            []contractExit           `json:"exit_status,omitempty"`
+	Stream                bool                     `json:"stream,omitempty"`                // output declares one item of a stream
+	ExitStatus            []contractExit           `json:"exit_status,omitempty"`           // see documentedExits
+	ExitStatusInherited   bool                     `json:"exit_status_inherited,omitempty"` // exit_status holds the root's entries
 
 	// Command facts from flag sets, hidden spellings and replacements; see contractParserFields.
 	HiddenAliases []string `json:"hidden_aliases,omitempty"` // names that run the command but are never listed
@@ -88,6 +89,42 @@ type contractCommand struct {
 	Agent   *bool    `json:"agent,omitempty"`   // offered to AI agents (true) or kept from them (false), as declared
 
 	Metadata map[string]string `json:"metadata,omitempty"` // the author's own labels, as written
+
+	Examples []contractExample `json:"examples,omitempty"`
+}
+
+// contractExample is one of a command's examples. Argv is nil when no command in the line runs
+// the program with literal words, and points at an empty list for the program run alone.
+type contractExample struct {
+	Run     string    `json:"run"`
+	Summary string    `json:"summary,omitempty"`
+	Argv    *[]string `json:"argv,omitempty"`
+}
+
+// contractExamples describes examples, each with the words it passes the program.
+func (p *program) contractExamples(examples []Example) []contractExample {
+	if len(examples) == 0 {
+		return nil
+	}
+	program := p.exampleProgram()
+	out := make([]contractExample, len(examples))
+	for i, e := range examples {
+		out[i] = contractExample{Run: e.Run, Summary: e.Summary}
+		if argv, ok := exampleRunArgv(e.Run, program); ok {
+			out[i].Argv = &argv
+		}
+	}
+	return out
+}
+
+// exampleProgram is the spellings that start an example of the program: its name, and its
+// display name's words when it has one.
+func (p *program) exampleProgram() [][]string {
+	out := [][]string{{p.rootName}}
+	if d := strings.Fields(p.rootDisplay); len(d) > 0 {
+		out = append(out, d)
+	}
+	return out
 }
 
 type contractArgument struct {
@@ -550,7 +587,7 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema,
 	}
 	if tag, kinds := outputKinds(shape, schemas); kinds != nil {
 		qualifier := typeName[:strings.LastIndex(typeName, ".")+1] // a composed cli's package, or ""
-		fmt.Fprintf(&b, ", Tag: %q, Kinds: []%s.OutputKind{", tag, rotiniPkgName)
+		fmt.Fprintf(&b, ", Tag: %q, Kinds: []%s.OutputKindDef{", tag, rotiniPkgName)
 		for i, k := range kinds {
 			if i > 0 {
 				b.WriteString(", ")
@@ -634,6 +671,7 @@ func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	if len(defs.pool) > 0 {
 		doc.Definitions = defs.pool
 	}
+	doc.Channels = p.contractChannels(defs)
 	for _, n := range nodes {
 		doc.Commands = append(doc.Commands, p.contractCommand(n, defs))
 		for _, pl := range n.plugins {
@@ -675,6 +713,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		Stability:             n.help.Stability,
 		Effects:               n.help.Effects,
 		Agent:                 n.help.Agent, Metadata: n.help.Metadata,
+		Examples: p.contractExamples(n.help.Examples),
 	}
 	in := n.inputs
 	if in == nil {
@@ -773,15 +812,30 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 	if n.output != nil {
 		c.Output = defs.schemaDoc(n.scope, *n.output)
 	}
-	for _, e := range n.help.ExitStatus {
+	p.contractExitStatus(&c, n, defs)
+	p.contractParserFields(&c, n, in)
+	return c
+}
+
+// contractExitStatus records the exit codes a command documents (see documentedExits), marked
+// inherited when they include the root's.
+func (p *program) contractExitStatus(c *contractCommand, n contractNode, defs *contractDefs) {
+	root := p.rootHelp.ExitStatus
+	if len(n.path) == 0 {
+		root = nil
+	}
+	for _, e := range documentedExits(n.help.ExitStatus, root) {
+		scope := n.scope
+		if e.inherited {
+			// The root's outputs name the root spec's schemas.
+			scope, c.ExitStatusInherited = nil, true
+		}
 		x := contractExit{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, DocsURL: e.DocsUrl}
 		if e.Output != nil {
-			x.Output = defs.schemaDoc(n.scope, *e.Output)
+			x.Output = defs.schemaDoc(scope, *e.Output)
 		}
 		c.ExitStatus = append(c.ExitStatus, x)
 	}
-	p.contractParserFields(&c, n, in)
-	return c
 }
 
 // contractCommandRules describes how a command reads its command line and where its values
@@ -912,9 +966,13 @@ func inputJSONSchema(s *InputSchema) any {
 }
 
 // jsonNumberRe matches a JSON number literal.
-var jsonNumberRe = sync.OnceValue(func() *regexp.Regexp {
-	return regexp.MustCompile(`^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$`)
-})
+func jsonNumberRe() *regexp.Regexp {
+	return jsonNumberReOnce.value(func() *regexp.Regexp {
+		return regexp.MustCompile(`^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$`)
+	})
+}
+
+var jsonNumberReOnce lazy[*regexp.Regexp]
 
 // typedEnum writes the enum members of an integer or number schema, which the spec writes as
 // strings, as JSON numbers, so the values match the schema's type. A member that isn't a JSON

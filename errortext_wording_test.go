@@ -136,7 +136,7 @@ func TestUsageErrorWording(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeConfig(t, tc.file)
 			var in wordingCfgInputs
-			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).Read(stRTX(nil), &in)
+			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path}}}).Read(stRTX(nil), &in)
 			if want := fmt.Sprintf(tc.want, path); err == nil || err.Error() != want {
 				t.Errorf("err = %v, want %q", err, want)
 			}
@@ -168,7 +168,7 @@ func TestDigitsAfterSwitch_declaredDigit(t *testing.T) {
 	}
 }
 
-// TestDigitsAfterSwitch_noCandidates pins that the error for -v3 offers a Suggestor nothing.
+// TestDigitsAfterSwitch_noCandidates pins that the error for -v3 offers a Suggester nothing.
 func TestDigitsAfterSwitch_noCandidates(t *testing.T) {
 	err := NewParser().Parse(NewContextFor(wordingDef(), []string{"-v3"}), &struct{}{})
 	pe, ok := errors.AsType[*ParseError](err)

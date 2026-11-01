@@ -15,11 +15,27 @@
        After rendering, rotini drops blank lines (in roff they are stray space, not
        paragraph breaks) and trailing whitespace, and ends the page with a newline.
 
-       DATA: .PageName .Section .Source .Date .RelatedPages .Header .Summary
+       DATA: .PageName .ParentPage .Section .Source .Date .RelatedPages .Header .Summary
          .Description .Footer .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
          .Arguments[] .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Stdin
-         .Output .ExitStatus[] .Examples[] .SeeAlso[]   (.Stdin and .Output are nil when the
-         command declares none). .Passthrough is the command's name when every word after it
+         .Output .ExitStatus[] .Examples[] .ExampleRows[] .SeeAlso[] .SeeAlsoRows[] .Files[]
+         .FlagRules[] .Metadata   (.Stdin and .Output are nil when the command declares none).
+         .SeeAlsoRows are the command's see_also entries as {.Text .Page .URL}: .Page is the page
+         name of a command or topic entry, .URL a url entry's link, and .Text what help shows
+         (.SeeAlso holds the .Text of each). .ParentPage is the parent
+         command's page name ("" on the root's page); command and topic rows carry .Page, their
+         own. .Files lists the configuration files the command's inputs are read from, in the
+         order they win, as {.File .Format .Found .PathFrom .AsEnv .Profiles .Note .Name} (nil
+         when none of its inputs reads one): .File is the path, or the name discovery looks for,
+         .Note the rest in one line (see help.txt.tmpl). .FlagRules are the rules between the
+         command's flags, {.Kind .Flags .Condition .Text}, .Text a sentence such as "--json and
+         --yaml can't be used together". A config row carries .Key (what a user writes in the
+         file) and .File (the one file it is read from, "" for any), beside the spec's .Name and
+         .Location. .Metadata, on the page and on command, argument, flag, env and config rows, is
+         the item's own `metadata` labels as written; the default template doesn't show it.
+         A flag, env or config row's .Type is the value's label in the user's words (string, int,
+         number, duration, file, string... for a list, key=value for a map, value for a type of
+         the author's own; see help.txt.tmpl). .Passthrough is the command's name when every word after it
          is passed through unparsed, else "". A command or flag group carries .Description,
          the paragraph the command's `groups` gives it.
          A flag or argument row also carries .Env (its environment variables, in lookup order) and
@@ -55,13 +71,19 @@
          The root's page carries .Topics[] {.Name .Summary}, its help topics, and
          .ResponseFiles, the response-file prefix ("" when response files are off). On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
-         generated environment topic's rows, each with .Commands (the commands that read it),
-         and the rest is empty.
+         generated environment topic's rows, .Files and .Configuration a generated configuration
+         topic's, each row with .Commands (the commands that read it), and the rest is empty.
        HELPERS: roff, roffBlock, roffIndented, roffLines, roffArg, roffCode, join, upper, lower,
                 title, trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
-                described. */ -}}
-{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
+                described, notes (the non-empty notes in one parenthetical: " (a, b)"). */ -}}
+{{- define "files"}}{{with .Files}}.SH FILES
+The first file listed that sets a key supplies it.
+{{range .}}.TP
+\fI{{roff .File}}\fR
+{{with .Note}}{{roff .}}{{else}}A configuration file.{{end}}
+{{end}}{{end}}{{end -}}
+{{- define "enum"}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
 {{- define "rules"}}{{with .Rules}}.br
 {{roffCode (join . "; ")}}
 {{end}}{{end -}}
@@ -77,7 +99,7 @@
 {{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{with .Effects}} ({{.}}){{end}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
+{{roff .Summary}}{{notes .Effects (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Implicit (printf "implicit: %s" (roff .Implicit))) (and .Accepts (roff .Accepts)) .Stability}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end -}}
@@ -119,26 +141,30 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff (or .Placeholder .Name)}}{{if .Variadic}}...{{end}}>{{else}}[{{roff (or .Placeholder .Name)}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{roff .Summary}}{{notes (and .Passthrough "passed through as typed") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end}}{{end}}
 {{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
 {{with .Description}}{{roffBlock .}}
 {{end}}{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
+{{if .FlagGroups}}{{with .FlagRules}}.PP
+{{range $i, $r := .}}{{if $i}}.br
+{{end}}{{roff (printf "%s." $r.Text)}}
+{{end}}{{end}}{{end}}
 {{with .Cascading}}.SH "GLOBAL OPTIONS"
 {{range .}}{{template "flag" .}}{{end}}{{end}}
 {{with .Environment}}.SH ENVIRONMENT
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{with .Commands}} (used by: {{roff (join . ", ")}}){{end}}{{template "notes" .}}
+{{roff .Summary}}{{notes (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability (and .Commands (printf "used by: %s" (roff (join .Commands ", "))))}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
-{{with .Configuration}}.SH CONFIGURATION
+{{if .Topic}}{{template "files" .}}{{end}}{{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
-\fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{template "notes" .}}
+\fB{{roff .Key}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Summary}}{{notes (and .File (printf "in %s" (roff .File))) (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability (and .Commands (printf "used by: %s" (roff (join .Commands ", "))))}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
-{{with .Stdin}}.SH STDIN
+{{if not .Topic}}{{template "files" .}}{{end}}{{with .Stdin}}.SH STDIN
 {{with .Description}}{{roffBlock .}}
 .PP
 {{end}}Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{if .NUL}} separated by NUL bytes{{end}}{{else if eq .Format "bytes"}}raw bytes{{else if eq .Format "jsonl"}}JSON Lines, one \fB{{roff .Type}}\fR record per line,{{else}}a \fB{{roff .Format}}\fR document{{with .Type}} (\fB{{roff .}}\fR){{end}}{{end}} from standard input{{if .Stream}}, one at a time{{end}}{{with .Unless}}, when no {{roff .}} is given{{end}}.{{if .Required}} Required.{{end}}
@@ -169,15 +195,16 @@ See \fI{{roff .}}\fR.
 {{with .Footer}}.SH NOTES
 {{roffBlock .}}
 {{end}}
-{{with .Examples}}.SH EXAMPLES
+{{with .ExampleRows}}.SH EXAMPLES
 .RS 4
 .nf
 {{range $i, $e := .}}{{if $i}}
 .sp
-{{end}}{{roffLines $e}}
+{{end}}{{with $e.Summary}}{{roffLines (printf "# %s" .)}}
+{{end}}{{roffLines $e.Run}}
 {{end}}.fi
 .RE
 {{end}}
-{{if or .RelatedPages .SeeAlso}}.SH "SEE ALSO"
-{{$first := true}}{{range .RelatedPages}}{{if not $first}}, {{end}}{{$first = false}}\fB{{roff .}}\fR({{$.Section}}){{end}}{{range .SeeAlso}}{{if not $first}}, {{end}}{{$first = false}}{{roff .}}{{end}}
+{{if or .RelatedPages .SeeAlsoRows}}.SH "SEE ALSO"
+{{$first := true}}{{range .RelatedPages}}{{if not $first}}, {{end}}{{$first = false}}\fB{{roff .}}\fR({{$.Section}}){{end}}{{range .SeeAlsoRows}}{{if not $first}}, {{end}}{{$first = false}}{{if .Page}}\fB{{roff .Page}}\fR({{$.Section}}){{else}}{{roff .Text}}{{end}}{{end}}
 {{end}}

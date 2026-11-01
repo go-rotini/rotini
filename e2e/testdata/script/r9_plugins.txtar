@@ -173,7 +173,7 @@ type hostHandler struct{ base }
 
 func (*hostHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 
-var suggestor = rotini.NewSuggestor()
+var suggester = rotini.NewSuggester()
 
 // Reporter maps rotini's categories onto this host's exit codes. A timeout is CategoryNone, so
 // it is matched on the typed Kind rather than the category.
@@ -183,7 +183,7 @@ func Reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 		if _, err := rtx.Stderr.Write([]byte("host: " + e.Error() + "\n")); err != nil {
 			continue
 		}
-		if hits := suggestor.For(e); len(hits) > 0 {
+		if hits := suggester.For(e); len(hits) > 0 {
 			fmt.Fprintf(rtx.Stderr, "host: did you mean %q?\n", hits[0])
 		}
 		if c := codeFor(e); c > worst {

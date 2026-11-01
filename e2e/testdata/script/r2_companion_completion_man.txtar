@@ -1,7 +1,7 @@
 # R2 — the rotini companion cli's own completion and man commands.
 #
 # The companion prints its shell completion scripts and its man pages from its own generated
-# Completion, Man, ManPages and ManSection: the same functions any rotini CLI gets with those
+# CompletionScript, Man, ManPages and ManSection: the same functions any rotini CLI gets with those
 # features on, so this is also the working example of them.
 
 # ── completion ───────────────────────────────────────────────────────────────

@@ -1,0 +1,107 @@
+# R16 — a freshly initialized CLI reports a mistyped command under --help and --version: the
+# seeded root hook returns rtx.UnknownCommand() before answering either flag. Deleting that
+# check from the hook (the author owns the stub) answers for the nearest command instead.
+
+gomodinit example.com/mycli
+exec rotini init mycli
+exec go mod tidy
+grep -count=1 'rtx.UnknownCommand\(\)' internal/cmd/mycli/mycli.go
+exec go build -o mycli$exe ./cmd/mycli
+
+# A mistyped command fails the same way with or without a short-circuit flag.
+wantexit 1 ./mycli$exe nope
+stderr '^Error: mycli: unknown command "nope"$'
+wantexit 1 ./mycli$exe nope --help
+stderr '^Error: mycli: unknown command "nope"$'
+! stdout .
+wantexit 1 ./mycli$exe --help nope
+stderr '^Error: mycli: unknown command "nope"$'
+wantexit 1 ./mycli$exe nope --version
+stderr '^Error: mycli: unknown command "nope"$'
+! stdout .
+
+# Words that resolve are answered as before.
+exec ./mycli$exe --help
+stdout 'Usage:'
+! stderr .
+exec ./mycli$exe version --help
+stdout 'Usage:'
+exec ./mycli$exe --version
+stdout '^mycli '
+
+# Opting out: the hook without the check prints the root's page and exits 0.
+cp optout.go.txt internal/cmd/mycli/mycli.go
+exec go build -o mycli$exe ./cmd/mycli
+exec ./mycli$exe nope --help
+stdout 'Usage:'
+! stderr .
+exec ./mycli$exe nope --version
+stdout '^mycli '
+wantexit 1 ./mycli$exe nope
+stderr '^Error: mycli: unknown command "nope"$'
+
+-- optout.go.txt --
+package mycli
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*mycliHandler)(nil)
+
+type mycliHandler struct {
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*mycliHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
+	argv, err := rtx.ArgvInputs[MycliInputs]()
+	if err != nil {
+		return err
+	}
+	inputs := argv.Values
+
+	if inputs.Mycli.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			return err
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+
+	if inputs.Mycli.Flags.Version {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+
+	return nil
+}
+
+func (*mycliHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	if _, err := rtx.Inputs[MycliInputs](); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+	return nil
+}

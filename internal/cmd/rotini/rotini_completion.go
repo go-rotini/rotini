@@ -7,29 +7,29 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*rotiniCompletionHandler)(nil)
+var _ rotini.HandlerE = (*rotiniCompletionHandler)(nil)
 
 type rotiniCompletionHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniCompletionInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 
-	script, err := Completion(inputs.RotiniCompletion.Arguments.Shell)
+	script, err := CompletionScript(inputs.RotiniCompletion.Arguments.Shell)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 
 	if _, err := fmt.Fprint(rtx.Stdout, script); err != nil {
-		haltWithWriteError(rtx, err)
+		return writeError(err)
 	}
+
+	return nil
 }

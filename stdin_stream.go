@@ -176,7 +176,7 @@ func streamEnd(l *stdinLines, tag stdinTag, err error) error {
 		return err // the stream reported it (see stdinStream)
 	}
 	if tag.required && l.items == 0 {
-		return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+		return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 	}
 	return nil
 }
@@ -234,11 +234,11 @@ func (rtx *Context) streamJSONL(fieldType reflect.Type, tag stdinTag, schema str
 func decodeJSONLRecord(fs *featureSet, raw []byte, line int, schema string, out any) error {
 	if err := invalidUTF8("json", raw); err != nil {
 		_, col, _ := parsePosition(err)
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d, column %d: %s", line, col, errInvalidUTF8), err)
+		return usageBind(InputErrorKindMalformedDocument, channelStdin, "", fmt.Sprintf("stdin line %d, column %d: %s", line, col, errInvalidUTF8), err)
 	}
 	if json.Valid(raw) {
 		if e := jsonDuplicateKey(raw); e != nil {
-			return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: duplicate key %q", line, e.Key), e)
+			return usageBind(InputErrorKindMalformedDocument, channelStdin, "", fmt.Sprintf("stdin line %d: duplicate key %q", line, e.Key), e)
 		}
 	}
 	if schema != "" {
@@ -252,7 +252,7 @@ func decodeJSONLRecord(fs *featureSet, raw []byte, line int, schema string, out 
 		return notJSONRecord(raw, line)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, jsonDecodeMessage(err)), err)
+		return usageBind(InputErrorKindInvalidValue, channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, jsonDecodeMessage(err)), err)
 	}
 	return nil
 }
@@ -280,14 +280,14 @@ func checkJSONLRecord(schema string, v any) error {
 	}
 	result, err := compiled.ValidateValue(doc)
 	if err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: the record could not be fully checked against its schema", line), err)
+		return usageBind(InputErrorKindSchemaViolation, channelStdin, "", fmt.Sprintf("stdin line %d: the record could not be fully checked against its schema", line), err)
 	}
 	if err := documentResult(schema, result); err != nil {
 		if ie, ok := asError[*InputError](err); ok {
 			// The line already says the problem is in stdin: "stdin line 2: field "value": …",
 			// not "stdin line 2: stdin field "value": …".
 			msg := strings.TrimPrefix(strings.TrimPrefix(ie.Msg, "stdin: "), "stdin ")
-			return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, msg), Cause: ie.Cause, usage: ie.usage}
+			return &InputError{Kind: ie.Kind, Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, msg), Cause: ie.Cause, usage: ie.usage}
 		}
 		return err
 	}
@@ -301,7 +301,7 @@ func notJSONRecord(raw []byte, line int) error {
 	if err == nil {
 		err = errors.New("more than one JSON value on the line")
 	}
-	return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, jsonDecodeMessage(err)), err)
+	return usageBind(InputErrorKindMalformedDocument, channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, jsonDecodeMessage(err)), err)
 }
 
 // splitStdinLines splits a slurped lines payload: on NUL bytes with every byte kept, or on
@@ -348,7 +348,7 @@ func bindJSONL(fs *featureSet, sf reflect.Value, text string, schemas map[string
 		out = reflect.Append(out, rec.Elem())
 	}
 	if out.Len() == 0 && tag.required {
-		return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+		return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 	}
 	p := reflect.New(elem)
 	p.Elem().Set(out)

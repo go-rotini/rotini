@@ -47,12 +47,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var suggestor = rotini.NewSuggestor()
+var suggester = rotini.NewSuggester()
 
 func report(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	for _, err := range out.Errors {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		if hits := suggestor.For(err); len(hits) > 0 {
+		if hits := suggester.For(err); len(hits) > 0 {
 			fmt.Fprintf(rtx.Stderr, "did you mean %q?\n", hits[0])
 		}
 	}

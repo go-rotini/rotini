@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-rotini/recon"
 )
@@ -19,19 +20,21 @@ import (
 // The constructors group into:
 //
 //   - program — [Plugins], [ResponseFiles], [Chdir], [Multicall]
-//   - input channels — [Stdin], [Env], [ConfigFiles], [Profiles], [EnvFiles],
+//   - input channels — [Stdin], [Env], [NestedEnv], [ConfigFiles], [Profiles], [EnvFiles],
 //     [Fallbacks], [PathExpansion], [UserHomes], [ObjectFlags], [Schemas]
-//   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv]
-//   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies],
-//     [StreamPaths]
-//   - value types — [URLValues], [EmailValues], [TimeZoneValues], [MACValues], [IPValues],
-//     [RegexpValues]
+//   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv], and an author's own [Codec]
+//   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies]
+//   - value types — [TimeValues], [URLValues], [EmailValues], [TimeZoneValues], [MACValues],
+//     [IPValues], [RegexpValues], [StreamPaths]
 //
 // A run that needs a feature its program was not given fails with a [*WiringError] whose
 // Feature names it.
 type Feature struct {
 	name  string
 	apply func(*featureSet)
+	// author marks a feature only the program can supply ([Codec]), which a program with every
+	// feature still takes from [Program.WithFeatures].
+	author bool
 }
 
 // String names the feature: "plugins", "stdin(json,yaml)", "codec:yaml", "values:url".
@@ -40,7 +43,9 @@ func (f Feature) String() string { return f.name }
 // featureSet is the features one program wires: each hook struct is nil when its feature is
 // not wired. The legacy constructors share one set with every feature ([allFeatures]).
 type featureSet struct {
-	all bool // allFeatures(): WithFeatures is a no-op; messages never needed
+	all bool // allFeatures(): WithFeatures adds only own features; messages never needed
+	// own is the program's own features (see [featureSet.withOwn]) a set with every feature has.
+	own []Feature
 
 	plugins   *pluginHooks
 	respFiles *responseFileHooks
@@ -55,6 +60,7 @@ type featureSet struct {
 		set  *recon.Codecs
 	} // built on first use
 	env       *envHooks
+	families  *envFamilyHooks
 	config    *configHooks
 	profiles  *profileHooks
 	envFiles  *envFileHooks
@@ -75,6 +81,7 @@ type featureSet struct {
 	deps        *dependencyHooks
 	streamPaths *streamPathHooks
 
+	times *timeHooks
 	kinds []*valueKind
 }
 
@@ -101,6 +108,8 @@ type chdirHooks struct {
 
 type multicallHooks struct {
 	route func(def Definition, argv0 string, argv []string, goos string) ([]string, bool)
+	// completion answers a routed completion request when [Program.WithCompletionFormat] set none.
+	completion CompletionFormat
 }
 
 type stdinHooks struct {
@@ -109,28 +118,41 @@ type stdinHooks struct {
 }
 
 type codecEntry struct {
-	name  string             // "json", "yaml", "toml", "jsonc", "dotenv"
+	name  string             // "json", "yaml", "toml", "jsonc", "dotenv", or a [Codec] format's
 	codec func() recon.Codec // the format's recon codec
+	// author marks a [Codec] format, with exts the file extensions it claims and encode, when
+	// [CodecEncode] gives one, the encoder its files are rewritten with; nil is read-only.
+	author bool
+	exts   []string
+	encode func(doc any) ([]byte, error)
 	// decodeAny decodes a document of any shape, for a stdin payload that is not an object;
 	// nil for toml and dotenv, whose documents are always tables.
 	decodeAny func(data []byte) (any, error)
+	// locate finds a value's line and column in a document, for an error about it; nil for a
+	// format with no positions to give (dotenv).
+	locate locator
 }
 
 type envHooks struct {
 	registry func(v reflect.Value, envPrefix string, view *osView) (*recon.Registry, error)
 }
 
+type envFamilyHooks struct {
+	// fill fills the nested env inputs of one Env struct, returning the recon keys it filled.
+	fill func(env reflect.Value, view *osView) (map[string]bool, error)
+}
+
 type configHooks struct {
 	regs        func(b *InputReader, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error)
-	fileSources func(b *InputReader, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error)
+	fileSources func(b *InputReader, files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error)
 	locate      func(rtx *Context, name string) (locatedConfigFile, error)
 }
 
 type profileHooks struct {
 	choices func(b *InputReader, chain []Command, store *parsedInputs, view *osView) map[string]profileChoice
 	check   func(b *InputReader, v reflect.Value, chain []Command, boot fileBootstrap, waived bool, view *osView) error
-	names   func(f ConfigFile, src recon.Source, path string) ([]string, error)
-	sources func(f ConfigFile, src recon.Source, path string, names []string, choice profileChoice) []recon.Source
+	names   func(f ConfigFileDef, src recon.Source, path string) ([]string, error)
+	sources func(f ConfigFileDef, src recon.Source, path string, names []string, choice profileChoice) []recon.Source
 }
 
 type envFileHooks struct {
@@ -165,7 +187,7 @@ type schemaHooks struct {
 	document        func(schema string, raw []byte) error
 	record          func(schema string, v any) error
 	patternMessages func(schema string, err error)
-	configFile      func(fs *featureSet, f ConfigFile, src *recon.FileSource, doc map[string]any, decoded bool, data []byte, profile string) error
+	configFile      func(fs *featureSet, f ConfigFileDef, src fileDoc, doc map[string]any, decoded bool, data []byte, profile string) error
 }
 
 type boundHooks struct {
@@ -193,8 +215,13 @@ type dependencyHooks struct {
 }
 
 type streamPathHooks struct {
-	check    func(label, typ, value, dir string) error
+	check    func(label, typ, value string, view *osView) error
 	dashOnce func(chain []Command, store *parsedInputs) error
+}
+
+type timeHooks struct {
+	coerce func(f reflect.Value, raw []string, ts timeSpec) error // a time field, ts not plain
+	parse  func(s string, ts timeSpec) (time.Time, error)
 }
 
 // kindType names a Go type by package path and name, never by reflect.TypeFor, so a kind that
@@ -237,18 +264,32 @@ var (
 // that gives recon's default extension precedence. Built once, on first use.
 func allFeatures() *featureSet {
 	allOnce.Do(func() {
-		s := newFeatureSet([]Feature{
-			Plugins(), ResponseFiles(), Chdir(), Multicall(),
-			Stdin(), Env(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
-			PathExpansion(), UserHomes(), ObjectFlags(), Schemas(),
-			YAML(), TOML(), JSONC(), JSON(), Dotenv(),
-			Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),
-			URLValues(), EmailValues(), TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),
-		})
+		s := newFeatureSet(everyFeature())
 		s.all = true
 		allSet = s
 	})
 	return allSet
+}
+
+// everyFeature lists every feature rotini ships, in [allFeatures]' order.
+func everyFeature() []Feature {
+	return []Feature{
+		Plugins(), ResponseFiles(), Chdir(), Multicall(),
+		Stdin(), Env(), NestedEnv(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
+		PathExpansion(), UserHomes(), ObjectFlags(), Schemas(),
+		YAML(), TOML(), JSONC(), JSON(), Dotenv(),
+		Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),
+		TimeValues(), URLValues(), EmailValues(), TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),
+	}
+}
+
+// withOwn is s, a set with every feature, which legacy programs share, plus the program's own
+// features fs ([Feature] values only the program can supply, such as [Codec]), as a new set.
+func (s *featureSet) withOwn(fs []Feature) *featureSet {
+	own := append(slices.Clone(s.own), fs...)
+	n := newFeatureSet(append(everyFeature(), own...))
+	n.all, n.own = true, own
+	return n
 }
 
 // legacyFeatures is the set [NewProgram], [NewProgramFunc] and [NewContextFor] give a program
@@ -283,6 +324,13 @@ func (s *featureSet) addCodec(c *codecEntry) {
 	if s.codec(c.name) == nil {
 		s.codecs = append(s.codecs, c)
 	}
+}
+
+// replaceCodec wires c, a [Codec] format, in place of any codec of its name, after every codec
+// wired so far, so it wins any extension they also claim.
+func (s *featureSet) replaceCodec(c *codecEntry) {
+	s.codecs = slices.DeleteFunc(s.codecs, func(e *codecEntry) bool { return e.name == c.name })
+	s.codecs = append(s.codecs, c)
 }
 
 // reconCodecs is the wired codecs as a recon codec set, in wiring order, fixed at its first use.

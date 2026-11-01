@@ -15,7 +15,13 @@ import (
 // effects, gets no rule, so the harness asks as it does by default.
 
 // permissionFiles names each harness's file; %s is the root command's name.
-var permissionFiles = map[string]string{"claude": "claude-settings.json", "codex": "%s.rules", "gemini": "%s-policy.toml"}
+func permissionFiles() map[string]string {
+	return permissionFilesOnce.value(func() map[string]string {
+		return map[string]string{"claude": "claude-settings.json", "codex": "%s.rules", "gemini": "%s-policy.toml"}
+	})
+}
+
+var permissionFilesOnce lazy[map[string]string]
 
 // permissionRule is one leaf command's rule: allow it, ask before it, or ask before it only
 // when one of raising's flags is given.
@@ -35,7 +41,7 @@ func renderPermissions(_ *program, f *Feature, a *agentProgram, _ *template.Temp
 	rules := permissionRules(a)
 	files := map[string][]byte{}
 	for _, h := range harnesses {
-		name := permissionFiles[h]
+		name := permissionFiles()[h]
 		if strings.Contains(name, "%s") {
 			name = fmt.Sprintf(name, a.doc.Name)
 		}

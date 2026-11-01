@@ -14,7 +14,8 @@ var programHandlersMethod = regexp.MustCompile(`(?m)^\t(\w+)\(\) rotini\.Handler
 // interface, and never through the reflective rotini.NewProgram.
 func assertSwitchDispatch(t *testing.T, src string, want ...string) {
 	t.Helper()
-	if !strings.Contains(src, "rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {") {
+	if !strings.Contains(src, "rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {") &&
+		!strings.Contains(src, "rotini.NewWiredProgram(rotiniDefinition(), func(name string) (rotini.Handler, bool) {") {
 		t.Errorf("generated NewProgram does not use rotini.NewWiredProgram:\n%s", src)
 	}
 	if strings.Contains(src, "rotini.NewProgram(") {

@@ -1,0 +1,6 @@
+spec: .rotini.spec.yaml:13:16: command demo: `inherit: true` adds the root's exit_status to a command's own, so the root has nothing to inherit; remove it
+spec: .rotini.spec.yaml:24:17: command demo/run: `$ref` "not_fund" names no exit status under the root command's `exit_statuses`; did you mean "not_found"?
+spec: .rotini.spec.yaml:26:11: command demo/run: `$ref` "busy" stands alone in its item: the entry is the named one; to document the code differently here, write the entry out
+spec: .rotini.spec.yaml:29:20: command demo/run: exit_status lists `inherit: true` twice; the root's codes are added once
+spec: .rotini.spec.yaml:33:11: command demo/put: exit_status item sets both `inherit` and `$ref`; give each its own item
+spec: .rotini.spec.yaml:34:11: command demo/put: `inherit: true` stands alone in its item; give the command's own codes items of their own

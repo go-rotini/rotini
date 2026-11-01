@@ -1,0 +1,212 @@
+# R17 — exit statuses reused rather than copied: a command lists one of the root's named
+# `exit_statuses` with `$ref`, and adds the root's list to its own with `inherit: true`. The
+# pages, the contract, the Definition (rotinitest.ExitDocumented), rotini diff and the handler
+# audit all read the same list, and validate.exit_status_one warns about a list without 1.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp cli-contract.json v1.json
+
+# The audit reads sync's list as the root's plus its own: 1 and 4 are documented, the root's
+# constant for an inherited code is the command's to use, and 7 is reported.
+cp sync.go.txt internal/cmd/todo/todo_sync.go
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+stderr '^Warning: internal[/\\]cmd[/\\]todo[/\\]todo_sync\.go:\d+: "todo sync" exits with 7, which its exit_status doesn''t list$'
+! stderr 'exits with 4|TodoExitFailed|belongs to'
+# A named exit status listed by $ref gets the command's own constant.
+grep '^\tTodoSyncExitBusy += 4 // "todo sync": busy$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoGetExitBusy += 4 // "todo get": busy$' internal/cmd/todo/zz_todo.go
+
+# The markdown page of sync lists the root's code and its own, in the list's order.
+grep 'MarkdownTodoSync = .*## Exit Status\\n\\n- `1` \(`failed`\) — the sync failed\\n- `4` \(`busy`\) — the store is locked \(retryable\)\\n' internal/cmd/todo/zz_todo.go
+
+# The contract carries each list, marked inherited for sync and push, which hold the root's;
+# get lists only its own.
+grep '(?s)"name": "todo sync".*"exit_status_inherited": true' cli-contract.json
+grep '(?s)"exit_status_inherited": true.*"exit_status_inherited": true' cli-contract.json
+! grep '(?s)"exit_status_inherited": true.*"exit_status_inherited": true.*"exit_status_inherited": true' cli-contract.json
+
+# The Definition holds the same list, so rotinitest.ExitDocumented passes both codes.
+exec go mod tidy
+exec go test ./internal/cmd/todo/
+exec go build -o todo$exe ./cmd/todo
+wantexit 4 ./todo$exe sync busy
+wantexit 1 ./todo$exe sync
+
+# rotini diff compares the lists each command documents: sync gains 4, keeping the root's 1.
+cp sync.added.yaml cmd/todo/.rotini.spec.yaml
+exec rotini diff v1.json --spec cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+stdout 'EXIT_STATUS_ADDED +todo push exit 4'
+! stdout 'EXIT_STATUS_NO_DELETE'
+
+# validate.exit_status_one warns about get, whose own list leaves out 1; sync has the root's.
+exec rotini validate cmd/todo/.rotini.spec.yaml --config one.conf.yaml
+stderr 'Warning: spec: .*\.rotini\.spec\.yaml:\d+:\d+: command todo/get: exit_status leaves out 1, the code every recorded error exits with unless a handler sets another; list it \(validate\.exit_status_one\)'
+! stderr 'todo/sync|todo/push'
+
+# A $ref to an undeclared name, and inherit on the root, are errors.
+! exec rotini validate bad.yaml
+stderr '`\$ref` "bsy" names no exit status under the root command''s `exit_statuses`; did you mean "busy"\?'
+stderr 'the root has nothing to inherit'
+
+# The guide's spec: sync documents the root's 1 and the named 4, get only 4.
+cp guide.yaml.txt cmd/todo/.rotini.spec.yaml
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+grep 'MarkdownTodoSync = .*## Exit Status\\n\\n- `1` \(`failed`\) — the command failed\\n- `4` \(`busy`\) — the store is locked \(retryable\)\\n' internal/cmd/todo/zz_todo.go
+grep 'MarkdownTodoGet = .*## Exit Status\\n\\n- `4` \(`busy`\) — the store is locked \(retryable\)\\n\\n' internal/cmd/todo/zz_todo.go
+grep '^\tTodoSyncExitBusy += 4' internal/cmd/todo/zz_todo.go
+
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  exit_statuses:
+    busy: { code: 4, summary: the store is locked, retryable: true }
+  exit_status:
+    - { code: 1, name: failed, summary: the sync failed }
+  commands:
+    - name: sync
+      summary: sync the store
+      arguments:
+        - name: mode
+          schema: { type: string }
+      exit_status:
+        - inherit: true
+        - $ref: busy
+    - name: get
+      summary: show a task
+      exit_status:
+        - $ref: busy
+    - name: push
+      summary: push tasks
+-- guide.yaml.txt --
+version: 0.0.0
+command:
+  name: todo
+  exit_statuses:
+    busy: { code: 4, summary: the store is locked, retryable: true }
+  exit_status:
+    - { code: 1, name: failed, summary: the command failed }
+  commands:
+    - name: sync
+      exit_status:
+        - inherit: true # the root's 1
+        - $ref: busy
+    - name: get
+      exit_status:
+        - $ref: busy
+-- sync.added.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  exit_statuses:
+    busy: { code: 4, summary: the store is locked, retryable: true }
+  exit_status:
+    - { code: 1, name: failed, summary: the sync failed }
+  commands:
+    - name: sync
+      summary: sync the store
+      arguments:
+        - name: mode
+          schema: { type: string }
+      exit_status:
+        - inherit: true
+        - $ref: busy
+    - name: get
+      summary: show a task
+      exit_status:
+        - $ref: busy
+    - name: push
+      summary: push tasks
+      exit_status:
+        - inherit: true
+        - $ref: busy
+-- bad.yaml --
+version: 0.0.0
+command:
+  name: todo
+  exit_statuses:
+    busy: { code: 4, summary: the store is locked }
+  exit_status:
+    - inherit: true
+  commands:
+    - name: get
+      exit_status:
+        - $ref: bsy
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: markdown
+      enabled: true
+-- one.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+validate:
+  exit_status_one: true
+-- sync.go.txt --
+package todo
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*todoSyncHandler)(nil)
+
+type todoSyncHandler struct{ rotini.NoHooksE }
+
+func (*todoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TodoSyncInputs]()
+	if err != nil {
+		return err
+	}
+	switch in.TodoSync.Arguments.Mode {
+	case "busy":
+		rtx.HaltWithCode(TodoSyncExitBusy)
+	case "failed":
+		rtx.HaltWithCode(TodoExitFailed)
+	case "odd":
+		rtx.HaltWithCode(7)
+	}
+	return errors.New("the store didn't answer")
+}
+-- internal/cmd/todo/todo_test.go --
+package todo_test
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+
+	"example.com/todo/internal/cmd/todo"
+)
+
+func TestSyncExitsAreDocumented(t *testing.T) {
+	for mode, want := range map[string]int{"busy": 4, "failed": 1, "": 1} {
+		var in todo.TodoSyncInputs
+		in.TodoSync.Arguments.Mode = mode
+		res := rotinitest.Run(t, todo.NewProgram(), in)
+		if res.Code != want {
+			t.Errorf("sync %q exited %d, want %d", mode, res.Code, want)
+		}
+		rotinitest.ExitDocumented(t, res)
+	}
+}

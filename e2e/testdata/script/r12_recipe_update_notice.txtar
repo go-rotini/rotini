@@ -64,29 +64,30 @@ var (
 
 // CascadingPostRun runs after every command. At most once a day, and only for a person at a
 // terminal, it says on stderr that a newer release exists.
-func (*updemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*updemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[UpdemoInputs]()
 	if err != nil || in.Updemo.Env.NoUpdateNotifier || in.Updemo.Env.Ci != "" || !isTerminal(rtx.Stderr) {
-		return
+		return nil
 	}
 	dirs, err := rotini.AppDirs(rtx, "updemo", "xdg")
 	if err != nil {
-		return
+		return nil
 	}
 	stamp := filepath.Join(dirs.Cache, "update-check")
 	if info, err := os.Stat(stamp); err == nil && time.Since(info.ModTime()) < 24*time.Hour {
-		return
+		return nil
 	}
 	// Record the check before making it, so a failing check isn't retried on every run.
 	if os.MkdirAll(dirs.Cache, 0o700) != nil || os.WriteFile(stamp, nil, 0o600) != nil {
-		return
+		return nil
 	}
 	latest, err := latestVersion(ctx)
 	if err != nil || latest == "" || latest == rtx.Version() {
-		return
+		return nil
 	}
 	fmt.Fprintf(rtx.Stderr, "A new release of updemo is available: %s → %s\n", rtx.Version(), latest)
 	fmt.Fprintln(rtx.Stderr, "Set UPDEMO_NO_UPDATE_NOTIFIER=1 to stop these notices.")
+	return nil
 }
 
 // fetchLatestVersion asks the release server for the newest version, giving up after two
@@ -119,18 +120,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*updemoHandler)(nil)
+var _ rotini.HandlerE = (*updemoHandler)(nil)
 
 type updemoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
 }
 
-func (*updemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*updemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[UpdemoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	if inputs.Updemo.Flags.Help {
@@ -141,23 +141,24 @@ func (*updemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) 
 
 		page, err := Help(path...)
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
+
+	return nil
 }
 
-func (*updemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*updemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- hello.go.txt --
 package updemo
@@ -169,17 +170,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*updemoHelloHandler)(nil)
+var _ rotini.HandlerE = (*updemoHelloHandler)(nil)
 
 type updemoHelloHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*updemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*updemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stdout, "hello")
+	return nil
 }
 -- selftest.go.txt --
 package updemo
@@ -230,6 +232,7 @@ generate:
     - type: cmd
       file: internal/cmd/updemo/zz_updemo.go
       package: updemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

@@ -8,7 +8,13 @@ import (
 )
 
 // effectKinds ranks the effect kinds, least risky first.
-var effectKinds = map[string]int{"read": 0, "write": 1, "destructive": 2}
+func effectKinds() map[string]int {
+	return effectKindsOnce.value(func() map[string]int {
+		return map[string]int{"read": 0, "write": 1, "destructive": 2}
+	})
+}
+
+var effectKindsOnce lazy[map[string]int]
 
 // isTrue reports whether an optional boolean is stated and true.
 func isTrue(b *bool) bool { return b != nil && *b }
@@ -32,7 +38,7 @@ func (d *differ) effects(st stability, where string, o, n *effects) {
 		return
 	}
 	var raised, lowered []string
-	switch or, nr := effectKinds[o.Kind], effectKinds[n.Kind]; {
+	switch or, nr := effectKinds()[o.Kind], effectKinds()[n.Kind]; {
 	case nr > or:
 		raised = append(raised, "kind "+o.Kind+" → "+n.Kind)
 	case nr < or:

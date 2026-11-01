@@ -27,25 +27,34 @@ var errPluginTimeout = errors.New("plugin timed out")
 
 // PluginErrorKind classifies a plugin-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
+// Compare kinds by constant; [PluginErrorKind.String] gives each one the stable label the
+// structured error output writes as its kind, noted beside each constant.
 type PluginErrorKind int
 
 // The plugin-dispatch failure kinds.
 const (
+	// PluginErrorKindUnspecified is the zero kind, for a PluginError built without one
+	// ("unspecified"; the structured error output leaves kind out).
+	PluginErrorKindUnspecified PluginErrorKind = iota
 	// PluginNotFound means no binary was found next to the executable, in the plugin path, or
-	// on PATH.
-	PluginNotFound PluginErrorKind = iota
-	// PluginTimeout means the plugin ran past its declared timeout and was stopped.
+	// on PATH ("binary-not-found").
+	PluginNotFound
+	// PluginTimeout means the plugin ran past its declared timeout and was stopped
+	// ("timeout").
 	PluginTimeout
 	// PluginStartFailed means the binary was found but could not be started (a fork, exec or
 	// pipe failure), or was not started because it is the running program itself, as with a
-	// multicall link named after the plugin's binary. The plugin's own non-zero exit is not an
-	// error kind.
+	// multicall link named after the plugin's binary ("spawn-failed"). The plugin's own
+	// non-zero exit is not an error kind.
 	PluginStartFailed
 )
 
-// String renders the kind as a short, stable label.
+// String renders the kind as a short, stable label: "unspecified", "binary-not-found",
+// "timeout" or "spawn-failed", and "unknown" for a value outside the constants.
 func (k PluginErrorKind) String() string {
 	switch k {
+	case PluginErrorKindUnspecified:
+		return "unspecified"
 	case PluginNotFound:
 		return "binary-not-found"
 	case PluginTimeout:
@@ -105,15 +114,28 @@ func (e *PluginError) Unwrap() []error {
 }
 
 // PluginDispatch is a resolved plugin invocation, declared or discovered: Def.Binary run with
-// Args. Dir is the command's plugin path, searched after the host binary's own directory and
-// before PATH; empty means none.
+// Args. PluginPath is the command's plugin path, searched after the host binary's own
+// directory and before PATH; empty means none.
 type PluginDispatch struct {
-	Def  PluginDef // the plugin, declared or built from the discovery prefix and token
-	Args []string  // the arguments passed to the binary
-	Dir  string    // the command's plugin path; "" for none
+	Def        PluginDef // the plugin, declared or built from the discovery prefix and token
+	Args       []string  // the arguments passed to the binary
+	PluginPath string    // the command's plugin path; "" for none
 	// Discovered marks a plugin-discovery dispatch rather than a declared plugin, which
 	// decides the error category when the binary cannot be resolved.
 	Discovered bool
+
+	// Dir is the plugin path, read only when PluginPath is "".
+	//
+	// Deprecated: use PluginPath.
+	Dir string
+}
+
+// searchPath is the plugin path the dispatch searches: PluginPath, else the deprecated Dir.
+func (r *PluginDispatch) searchPath() string {
+	if r.PluginPath != "" {
+		return r.PluginPath
+	}
+	return r.Dir
 }
 
 // execPlugin locates and runs the co-located plugin binary, passing stdio through, honoring
@@ -147,7 +169,7 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 // start failure); otherwise code is the plugin's exit code, and err its *exec.ExitError when it
 // failed.
 func (p *Program) runPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (code int, perr *PluginError, err error) {
-	path, err := resolvePluginBinary(r.Def.Binary, r.Dir, rtx.osView())
+	path, err := resolvePluginBinary(r.Def.Binary, r.searchPath(), rtx.osView())
 	if err != nil {
 		cat := CategoryInternal
 		var candidates []string
@@ -276,7 +298,7 @@ func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginErr
 	return p.settle(ctx, rtx)
 }
 
-// PluginBinary reports the executable the named plugin of cmd would run, and whether it
+// LookPlugin reports the executable the named plugin of cmd would run, and whether it
 // resolves. It searches where dispatch searches, in the same order: next to the host binary,
 // then the command's plugin path, then PATH. Use it, not exec.LookPath, to check which
 // plugins are installed.
@@ -286,7 +308,7 @@ func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginErr
 // found, or for a discovery token that is not a plain file name (it holds a path separator, or
 // is "." or "..") or that differs only in case from a name cmd declares. It reads the
 // filesystem on every call.
-func (cmd Command) PluginBinary(name string) (string, bool) {
+func (cmd Command) LookPlugin(name string) (string, bool) {
 	dir := cmd.PluginPath
 	var binary string
 	switch rd, ok := findPlugin(&cmd, name); {
@@ -303,6 +325,9 @@ func (cmd Command) PluginBinary(name string) (string, bool) {
 	}
 	return path, true
 }
+
+// Deprecated: use [Command.LookPlugin].
+func (cmd Command) PluginBinary(name string) (string, bool) { return cmd.LookPlugin(name) }
 
 // resolvePluginBinary finds the plugin binary: first next to the running executable, then in
 // dir (the command's plugin path, when set), then on PATH. The error names only the locations

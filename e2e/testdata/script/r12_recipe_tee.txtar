@@ -42,29 +42,30 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*teedemoExportHandler)(nil)
+var _ rotini.HandlerE = (*teedemoExportHandler)(nil)
 
 type teedemoExportHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*teedemoExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*teedemoExportHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TeedemoExportInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	flags := in.TeedemoExport.Flags
 	if err := export(rtx, flags.Output, flags.Force); err != nil {
-		rtx.HaltWith(err)
+		return err
 	}
+
+	return nil
 }
 
 func export(rtx *rotini.Context, path string, force bool) error {
-	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	out, err := rotini.CreateOutput(rtx, path, rotini.OutputOverwrite(force))
 	if err != nil {
 		return err
 	}
@@ -109,3 +110,4 @@ generate:
     - type: cmd
       file: internal/cmd/teedemo/zz_teedemo.go
       package: teedemo
+      hook_returns: error

@@ -26,7 +26,7 @@ func formatFixture(t *testing.T, argv ...string) InputReport {
 		WithDir(dir)
 	defaults, err := rtx.DefaultInputs[acDeployInputs]()
 	must(t, err)
-	files, err := rtx.FileInputs[acDeployInputs]()
+	files, err := rtx.ConfigInputs[acDeployInputs]()
 	must(t, err)
 	env, err := rtx.EnvInputs[acDeployInputs]()
 	must(t, err)

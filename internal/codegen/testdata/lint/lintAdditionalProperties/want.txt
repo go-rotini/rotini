@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:20:48: command demo: `additionalProperties` sits beside `$ref`, which is read without the keys beside it; write it on the named schema
+spec: .rotini.spec.yaml:22:55: command demo: `additionalProperties` is on an object schema with no `properties`; list the keys it allows under `properties`
+spec: .rotini.spec.yaml:21:54: command demo: `additionalProperties` is on a schema of type string; it applies only to an object

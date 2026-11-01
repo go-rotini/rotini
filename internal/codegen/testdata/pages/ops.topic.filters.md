@@ -5,3 +5,7 @@ how filters work
 A filter is a word that narrows a list.
 
 Filters combine with AND.
+
+## See Also
+
+- [ops](ops.md)

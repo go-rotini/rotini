@@ -133,7 +133,7 @@ func TestCreateOutput_refusesToOverwrite(t *testing.T) {
 	}
 }
 
-// TestCreateOutput_fileAppearedBeforeClose pins that, without Overwrite, a file created at the
+// TestCreateOutput_fileAppearedBeforeClose pins that, without OutputOverwrite, a file created at the
 // path after CreateOutput is kept: Close returns CreateOutput's usage error and leaves no
 // temporary file, and the closed file takes no more writes.
 func TestCreateOutput_fileAppearedBeforeClose(t *testing.T) {
@@ -173,7 +173,7 @@ func TestCreateOutput_overwriteKeepsMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f, err := CreateOutput(rtx, path, Overwrite(true))
+	f, err := CreateOutput(rtx, path, OutputOverwrite(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestCreateOutput_fileMode(t *testing.T) {
 		t.Skip("Windows has no permission bits")
 	}
 	rtx, dir := outputDir(t)
-	f, err := CreateOutput(rtx, "secret", FileMode(0o600))
+	f, err := CreateOutput(rtx, "secret", OutputFileMode(0o600))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCreateOutput_abortDiscards(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f, err := CreateOutput(rtx, "out.txt", Overwrite(true))
+	f, err := CreateOutput(rtx, "out.txt", OutputOverwrite(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestCreateOutput_writeErrorFailsClose(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f, err := CreateOutput(rtx, "out.txt", Overwrite(true))
+	f, err := CreateOutput(rtx, "out.txt", OutputOverwrite(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestCreateOutput_symlinkKeepsTheLink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("no symlinks: %v", err)
 	}
-	f, err := CreateOutput(rtx, "link.txt", Overwrite(true))
+	f, err := CreateOutput(rtx, "link.txt", OutputOverwrite(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestCreateOutput_symlinkKeepsTheLink(t *testing.T) {
 	}
 }
 
-// A link to a file that doesn't exist is refused, with or without Overwrite: it is never
+// A link to a file that doesn't exist is refused, with or without OutputOverwrite: it is never
 // replaced by a regular file that takes the link's own permissions.
 func TestCreateOutput_danglingLinkIsRefused(t *testing.T) {
 	t.Parallel()
@@ -322,13 +322,13 @@ func TestCreateOutput_danglingLinkIsRefused(t *testing.T) {
 		t.Skipf("no symlinks: %v", err)
 	}
 	for _, overwrite := range []bool{false, true} {
-		f, err := CreateOutput(rtx, "link.txt", Overwrite(overwrite))
+		f, err := CreateOutput(rtx, "link.txt", OutputOverwrite(overwrite))
 		if err == nil {
 			_ = f.Abort()
-			t.Fatalf("Overwrite(%v): a dangling link was accepted", overwrite)
+			t.Fatalf("OutputOverwrite(%v): a dangling link was accepted", overwrite)
 		}
 		if CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `output file "link.txt" is a symbolic link to a file that doesn't exist`) {
-			t.Errorf("Overwrite(%v): %v (category %v)", overwrite, err, CategoryOf(err))
+			t.Errorf("OutputOverwrite(%v): %v (category %v)", overwrite, err, CategoryOf(err))
 		}
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
@@ -411,12 +411,12 @@ func TestRetryRename(t *testing.T) {
 	}
 }
 
-// Without Overwrite, a file that appears at the path after CreateOutput is not replaced: Close
+// Without OutputOverwrite, a file that appears at the path after CreateOutput is not replaced: Close
 // returns the usage error CreateOutput would and removes the temporary file.
 func TestOutputFile_closeRechecksTheTarget(t *testing.T) {
 	t.Parallel()
 	rtx, dir := outputDir(t)
-	f, err := CreateOutput(rtx, "out.txt", Overwrite(false))
+	f, err := CreateOutput(rtx, "out.txt", OutputOverwrite(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestOutputFile_closeRechecksTheTarget(t *testing.T) {
 	}
 }
 
-// FileMode applies to a replaced file too, in place of the replaced file's own mode.
+// OutputFileMode applies to a replaced file too, in place of the replaced file's own mode.
 func TestOutputFile_fileModeOnReplace(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -448,7 +448,7 @@ func TestOutputFile_fileModeOnReplace(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f, err := CreateOutput(rtx, "out.txt", Overwrite(true), FileMode(0o600))
+	f, err := CreateOutput(rtx, "out.txt", OutputOverwrite(true), OutputFileMode(0o600))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestOutputFile_fileModeOnReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want FileMode's 0600", info.Mode().Perm())
+		t.Errorf("mode = %v, want OutputFileMode's 0600", info.Mode().Perm())
 	}
 }
 

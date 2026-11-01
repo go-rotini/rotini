@@ -1,0 +1,14 @@
+# No root flags at all: no hook, and a dispatch-only root or group prints its help when called
+# bare.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  commands:
+    - name: build
+      summary: build it
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote

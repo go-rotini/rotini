@@ -42,6 +42,9 @@ how filters work
 .TP
 \fBenvironment\fR
 the environment variables ops reads
+.TP
+\fBconfiguration\fR
+the configuration files and keys ops reads
 .SH "OPTIONS"
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -80,14 +83,14 @@ the log level [debug|info|error]
 .RE
 .SH CONFIGURATION
 .TP
-\fBregion\fR (region) \fIstring\fR
+\fBregion\fR \fIstring\fR
 the default region (beta)
 .sp
 The region commands use when none is given.
 .br
 must look like eu\-1
 .TP
-\fBprofile\fR (profile) \fIstring\fR
+\fBprofile\fR \fIstring\fR
 the output profile [short|long]
 .RS
 .RS 2
@@ -96,6 +99,14 @@ the output profile [short|long]
 \fBlong\fR \- every field
 .RE
 .RE
+.SH FILES
+The first file listed that sets a key supplies it.
+.TP
+\fI~/.ops.yaml\fR
+A configuration file.
+.TP
+\fI\&.ops.yaml\fR
+in the working directory or the nearest parent holding one
 .SH "EXIT STATUS"
 .TP
 \fB0\fR
@@ -106,4 +117,4 @@ the fleet did not answer (retryable)
 .SH "SEE ALSO"
 \fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
 \fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-legacy\fR(1), \fBops\-run\fR(1),
-\fBops\-filters\fR(1), \fBops\-environment\fR(1)
+\fBops\-filters\fR(1), \fBops\-environment\fR(1), \fBops\-configuration\fR(1)

@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 
 	"github.com/go-rotini/toml"
@@ -84,13 +83,13 @@ func exampleExt(cf ConfigurationFile, format string) string {
 
 // exampleFiles are the configuration files that get an example: every declared file, once per
 // command scope and name, except those read as environment variables (the .env example covers
-// them).
+// them) and those in a format of the program's own, which rotini can't write.
 func (p *program) exampleFiles() []scopedConfigFile {
 	var out []scopedConfigFile
 	seen := map[string]bool{}
 	for _, cf := range p.configFiles {
 		id := cf.Scope + "\x00" + cf.Name
-		if cf.As == "env" || seen[id] {
+		if cf.As == "env" || seen[id] || cf.Format != "" && !slices.Contains(builtinConfigFormats, cf.Format) {
 			continue
 		}
 		seen[id] = true
@@ -477,7 +476,11 @@ func jsonInline(v any) string {
 }
 
 // bareKey matches a key YAML and TOML take unquoted.
-var bareKey = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_-]+$`) })
+func bareKey() *regexp.Regexp {
+	return bareKeyOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_-]+$`) })
+}
+
+var bareKeyOnce lazy[*regexp.Regexp]
 
 // tomlExample writes a TOML example: the keys of each table, then its sub-tables.
 func tomlExample(b *strings.Builder, n *exampleNode, at []string) {
@@ -591,7 +594,11 @@ func dotenvValue(v any) string {
 }
 
 // dotenvBare matches a dotenv value that needs no quotes.
-var dotenvBare = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-]*$`) })
+func dotenvBare() *regexp.Regexp {
+	return dotenvBareOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-]*$`) })
+}
+
+var dotenvBareOnce lazy[*regexp.Regexp]
 
 // ─── the .env example ─────────────────────────────────────────────────────────.
 

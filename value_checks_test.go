@@ -19,12 +19,12 @@ func TestCheckNumberBounds_nonFinite(t *testing.T) {
 	}
 	for _, v := range []string{"nan", "NaN", "inf", "+Inf", "-inf", "infinity"} {
 		for kind, c := range bounds {
-			err := checkConstraints(allFeatures(), "--ratio", "float64", "", c, []string{v}, false, "")
+			err := checkConstraints(allFeatures(), "--ratio", "float64", "", c, []string{v}, false, nil)
 			if err == nil || !strings.Contains(err.Error(), "--ratio must be a finite number (got "+v+")") {
 				t.Errorf("%s with %s: err = %v, want a finite-number error", v, kind, err)
 			}
 		}
-		if err := checkConstraints(allFeatures(), "--ratio", "float64", "", Constraints{}, []string{v}, false, ""); err != nil {
+		if err := checkConstraints(allFeatures(), "--ratio", "float64", "", Constraints{}, []string{v}, false, nil); err != nil {
 			t.Errorf("%s unbounded: err = %v, want accepted", v, err)
 		}
 	}
@@ -63,7 +63,7 @@ func TestConstraints_documentedSemantics(t *testing.T) {
 		{"minItems counts items", "[]string", Constraints{MinItems: 2}, []string{"a"}, false},
 	}
 	for _, c := range cases {
-		err := checkConstraints(allFeatures(), "--x", c.typ, "", c.c, c.values, false, "")
+		err := checkConstraints(allFeatures(), "--x", c.typ, "", c.c, c.values, false, nil)
 		if (err == nil) != c.ok {
 			t.Errorf("%s: err = %v, want ok=%v", c.name, err, c.ok)
 		}

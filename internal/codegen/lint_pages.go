@@ -68,16 +68,16 @@ func lintStability(spec *Spec) []error {
 		warn := func(at, msg string) {
 			problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, sev: severityWarning, msg: msg})
 		}
-		if c.Stability != "" && inherited != "" && stabilityRank[c.Stability] > stabilityRank[inherited] {
+		if c.Stability != "" && inherited != "" && stabilityRank()[c.Stability] > stabilityRank()[inherited] {
 			warn(ptr+"/stability", fmt.Sprintf("declares stability %q but inherits %s from %s; a command is as unstable as its ancestors; remove `stability` or make it %q", c.Stability, inherited, from, inherited))
 		}
 		effective, source := inherited, from
-		if c.Stability != "" && stabilityRank[c.Stability] < stabilityRank[inherited] {
+		if c.Stability != "" && stabilityRank()[c.Stability] < stabilityRank()[inherited] {
 			effective, source = c.Stability, "command "+path
 		}
 		eachPageInput(c, ptr, func(in pageInput) {
 			switch {
-			case in.stability != "" && effective != "" && stabilityRank[in.stability] > stabilityRank[effective]:
+			case in.stability != "" && effective != "" && stabilityRank()[in.stability] > stabilityRank()[effective]:
 				warn(in.ptr+"/stability", fmt.Sprintf("%s: declares stability %q but inherits %s from %s; an input is as unstable as its command; remove `stability` or make it %q", in.subject, in.stability, effective, source, effective))
 			case in.stability == "experimental" && in.required && effective != "experimental":
 				warn(in.ptr+"/stability", in.subject+": is required and experimental on a command that isn't experimental, so the command depends on an input that may change or go away; make it optional, or mark the command experimental too")
@@ -100,17 +100,11 @@ func lintStability(spec *Spec) []error {
 	return problems
 }
 
-// lintTopics checks help topics: they are declared on the root, each name once, with exactly
-// one of `body` and `generate`, and no name a root command, alias or declared plugin also
-// answers to (`help <name>` would be ambiguous).
+// lintTopics checks the root's help topics: each name once, with exactly one of `body` and
+// `generate`, and no name a root command, alias or declared plugin also answers to (`help
+// <name>` would be ambiguous). [lintDocLevelKeys] keeps them on the root.
 func lintTopics(spec *Spec) []error {
 	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c != &spec.Command && len(c.Topics) > 0 {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/topics", loc: "command " + path,
-				msg: "sets `topics`, which only the root command declares; move the topics to the root"})
-		}
-	})
 	root := &spec.Command
 	taken := map[string]string{}
 	for _, c := range root.Commands {
@@ -129,7 +123,7 @@ func lintTopics(spec *Spec) []error {
 	}
 	loc := rootLabel(spec)
 	seen := map[string]bool{}
-	environment := false
+	generated := map[string]bool{}
 	for i, t := range root.Topics {
 		at := fmt.Sprintf("%s/topics/%d", rootPointer, i)
 		add := func(key, msg string) {
@@ -152,11 +146,11 @@ func lintTopics(spec *Spec) []error {
 		case t.Body != "" && t.Generate != "":
 			add("body", "sets both `body` and `generate`; keep one")
 		}
-		if t.Generate == topicGenerateEnvironment {
-			if environment {
-				add("generate", "generates the environment page a second time; keep one")
+		if t.Generate != "" {
+			if generated[t.Generate] {
+				add("generate", fmt.Sprintf("generates the %s page a second time; keep one", t.Generate))
 			}
-			environment = true
+			generated[t.Generate] = true
 		}
 	}
 	return problems
@@ -183,9 +177,15 @@ func lintDocsURL(spec *Spec) []error {
 }
 
 // installFeatures are the features install_dir applies to.
-var installFeatures = map[string]bool{"completion": true, "man": true}
+func installFeatures() map[string]bool {
+	return installFeaturesOnce.value(func() map[string]bool {
+		return map[string]bool{"completion": true, "man": true, "markdown": true}
+	})
+}
 
-// lintInstallDir rejects install_dir on a feature other than completion and man, where nothing
+var installFeaturesOnce lazy[map[string]bool]
+
+// lintInstallDir rejects install_dir on a feature other than completion, man and markdown, where nothing
 // would be written, and an install_dir that escapes the module.
 func lintInstallDir(conf *Conf) []error {
 	if conf.Generate == nil {
@@ -197,9 +197,9 @@ func lintInstallDir(conf *Conf) []error {
 			continue
 		}
 		loc := "generate.features." + f.Type + ".install_dir"
-		if !installFeatures[f.Type] {
+		if !installFeatures()[f.Type] {
 			problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/install_dir", loc: loc,
-				msg: "`install_dir` writes installable completion scripts and man pages, so it applies only to the completion and man features; move it there or remove it"})
+				msg: "`install_dir` writes installable completion scripts, man pages and markdown pages, so it applies only to the completion, man and markdown features; move it there or remove it"})
 			continue
 		}
 		if why := escapesModule(f.InstallDir); why != "" {

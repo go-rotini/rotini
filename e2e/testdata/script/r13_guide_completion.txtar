@@ -121,7 +121,7 @@ exec ./todo$exe __complete --env ''
 cmp stdout want-env-bare.txt
 env TODO_COMPLETION_DESCRIPTIONS=
 
-# install_dir writes Nushell's script too, holding exactly what Completion returns.
+# install_dir writes Nushell's script too, holding exactly what CompletionScript returns.
 exists share/completions/todo.nu
 exec ./todo$exe completion nushell
 cmp stdout share/completions/todo.nu
@@ -405,7 +405,7 @@ func (*todoImportHandler) CompleteArgValue(rtx *rotini.Context, arg, partial str
 	if names := remoteListsMatching(rtx.Context(), partial); len(names) > 0 {
 		return names
 	}
-	rtx.SetCompletionFallback(rotini.Completion{Kind: "file", Extensions: []string{"json"}})
+	rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "file", Extensions: []string{"json"}})
 	return []string{}
 }
 -- internal/cmd/todo/todo_tag.go --

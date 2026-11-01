@@ -183,7 +183,7 @@ func TestObjectFlag_fallbacks(t *testing.T) {
 	})
 	t.Run("config block and list", func(t *testing.T) {
 		cfg := writeConfig(t, "db:\n  host: cfg, with comma\n  port: 7\n  pool:\n    max: 2\nmount:\n  - src: a\n  - src: b\n    readonly: true\n")
-		in := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		in := bind(t, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if got := in.App.Flags.DB; got.Host != "cfg, with comma" || got.Port != 7 || got.Pool.Max != 2 {
 			t.Errorf("DB = %+v", got)
 		}

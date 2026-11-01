@@ -41,6 +41,7 @@ command:
     - name: add
       summary: add a task
       effects: { kind: write }
+      metadata: { owner: core-team }
       examples:
         - taskr add "buy milk" --tag home
       arguments:

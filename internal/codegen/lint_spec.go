@@ -64,6 +64,7 @@ var specLints = []func(*Spec) []error{
 	lintSiblingCollisions,
 	lintDuplicateInputNames,
 	lintGoNames,
+	lintChannels,
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintPluginTimeouts,
@@ -110,6 +111,8 @@ var specLints = []func(*Spec) []error{
 	lintObjectFlags,
 	lintLayout,
 	lintExitStatus,
+	lintExitStatusRefs,
+	lintExitNames,
 	lintStdinSchema,
 	lintGroups,
 	lintRepeatable,
@@ -130,6 +133,8 @@ var specLints = []func(*Spec) []error{
 	lintConfigFilesAsEnv,
 	lintDiscoverApp,
 	lintConfigSourceFormat,
+	lintFormatNames,
+	lintAdditionalProperties,
 	lintStreamPaths,
 	lintRoles,
 	lintGlob,
@@ -151,6 +156,7 @@ var specLints = []func(*Spec) []error{
 	lintProfiles,
 	lintEffects,
 	lintFlagRoles,
+	lintReadOnlyRoles,
 	lintAgent,
 	lintExamplesParse,
 	lintConfigFileSchemaRefs,
@@ -179,31 +185,53 @@ func rootLabel(spec *Spec) string {
 	return "command " + spec.Command.Name
 }
 
-// lintDocLevelKeys rejects env_prefix, schemas and display_name on a non-root command:
-// codegen reads them only on the root, so elsewhere they would be silently ignored.
+// rootOnlyKey is a command key rotini reads only on the root command.
+type rootOnlyKey struct {
+	key string
+	set func(*Command) bool
+	msg string // the problem's message on a sub-command; "" for the usual one
+}
+
+// rootOnlyKeys are the command keys rotini reads only on the root command, in the order
+// lintDocLevelKeys reports them. The spec schema describes each as "Root only:".
+func rootOnlyKeys() []rootOnlyKey {
+	return rootOnlyKeysOnce.value(func() []rootOnlyKey {
+		return []rootOnlyKey{
+			{key: "env_prefix", set: func(c *Command) bool { return c.EnvPrefix != "" }},
+			{key: "schemas", set: func(c *Command) bool { return c.Schemas != nil }},
+			{key: "exit_statuses", set: func(c *Command) bool { return c.ExitStatuses != nil }},
+			{key: "display_name", set: func(c *Command) bool { return c.DisplayName != "" }},
+			{key: "response_files", set: func(c *Command) bool { return c.ResponseFiles != nil }},
+			{key: "channels", set: func(c *Command) bool { return c.Channels != nil }},
+			{key: "flag_sets", set: func(c *Command) bool { return len(c.FlagSets) > 0 },
+				msg: "declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them"},
+			{key: "multicall", set: func(c *Command) bool { return c.Multicall != nil },
+				msg: "sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)"},
+			{key: "topics", set: func(c *Command) bool { return len(c.Topics) > 0 },
+				msg: "sets `topics`, which only the root command declares; move the topics to the root"},
+		}
+	})
+}
+
+var rootOnlyKeysOnce lazy[[]rootOnlyKey]
+
+// lintDocLevelKeys rejects each of [rootOnlyKeys] on a non-root command: rotini reads them
+// only on the root, so elsewhere they would be silently ignored.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c == &spec.Command {
 			return
 		}
-		add := func(key string) {
-			problems = append(problems, &problem{
-				kind: "spec", ptr: ptr + "/" + key, loc: "command " + path,
-				msg: fmt.Sprintf("sets %#q, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", key),
-			})
-		}
-		if c.EnvPrefix != "" {
-			add("env_prefix")
-		}
-		if c.Schemas != nil {
-			add("schemas")
-		}
-		if c.DisplayName != "" {
-			add("display_name")
-		}
-		if c.ResponseFiles != nil {
-			add("response_files")
+		for _, k := range rootOnlyKeys() {
+			if !k.set(c) {
+				continue
+			}
+			msg := k.msg
+			if msg == "" {
+				msg = fmt.Sprintf("sets %#q, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", k.key)
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/" + k.key, loc: "command " + path, msg: msg})
 		}
 	})
 	return problems
@@ -734,12 +762,18 @@ func lintConfigSource(spec *Spec) []error {
 
 // constraintNumericFamily mirrors the runtime's numericFamily in parser.go: the
 // range-checkable int, uint and float types plus the JSON Schema aliases.
-var constraintNumericFamily = map[string]bool{
-	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
-	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"float32": true, "float64": true,
-	"integer": true, "number": true,
+func constraintNumericFamily() map[string]bool {
+	return constraintNumericFamilyOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+			"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+			"float32": true, "float64": true,
+			"integer": true, "number": true,
+		}
+	})
 }
+
+var constraintNumericFamilyOnce lazy[map[string]bool]
 
 // inputProblem builds a spec problem about one input, labeled `command <path>: <channel>
 // "<name>": …` and positioned at ptr: the key at fault below the input's pointer from
@@ -854,9 +888,9 @@ func boundApplicability(schema *InputSchema, typ, elem string) []keyedMsg {
 	switch {
 	case first == "":
 		return nil
-	case measuredTypes[elem]:
+	case measuredTypes()[elem]:
 		return measuredBoundProblems(schema, elem)
-	case !constraintNumericFamily[elem]:
+	case !constraintNumericFamily()[elem]:
 		return []keyedMsg{{first, fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s; the bound would be silently ignored", typ)}}
 	}
 	var out []keyedMsg
@@ -1208,7 +1242,7 @@ func lintComplete(spec *Spec) []error {
 				}
 			case "executable", "user", "group", "host":
 				if t != "string" && t != "[]string" {
-					p := schemaKeyProblem(ptr, "complete/kind", path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
+					p := schemaKeyProblem(ptr, "complete/kind", path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns()[kind]))
 					p.sev = severityWarning
 					problems = append(problems, p)
 				}
@@ -1219,7 +1253,13 @@ func lintComplete(spec *Spec) []error {
 }
 
 // nativeKindNouns names what each shell-completed `complete.kind` offers.
-var nativeKindNouns = map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
+func nativeKindNouns() map[string]string {
+	return nativeKindNounsOnce.value(func() map[string]string {
+		return map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
+	})
+}
+
+var nativeKindNounsOnce lazy[map[string]string]
 
 // lintDefaultScalar requires a `default:` to be a scalar, or, on a repeatable (list or map)
 // input, a list or map of scalars, each seeded as one occurrence.
@@ -1345,7 +1385,7 @@ func lintConfigInputScope(spec *Spec) []error {
 		}
 		for i, in := range cmd.Config {
 			p := inputProblem(fmt.Sprintf("%s/config/%d", ptr, i), path, "config", in.Name,
-				"no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it")
+				"no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless a source added to InputSettings.Sources supplies it")
 			p.sev = severityWarning
 			problems = append(problems, p)
 		}
@@ -1580,6 +1620,9 @@ func lintSchemaRefs(spec *Spec) []error {
 	})
 	for _, name := range names {
 		walkSchemaTree(spec.Command.Schemas[name].BaseSchema, checkAt(rootLabel(spec), fmt.Sprintf("schema %q", name), rootPointer+"/schemas/"+name))
+	}
+	for i, c := range spec.Command.Channels {
+		walkSchemaTree(c.Schema.BaseSchema, checkAt(rootLabel(spec), fmt.Sprintf("channel %q", c.Name), fmt.Sprintf("%s/channels/%d/schema", rootPointer, i)))
 	}
 	return append(problems, schemaRefCycles(spec, names)...)
 }
@@ -2099,6 +2142,9 @@ func lintExitStatus(spec *Spec) []error {
 		seen := map[int]bool{}
 		names := map[string]string{} // generated constant suffix → the name that claimed it
 		for i, e := range c.ExitStatus {
+			if e.Inherit || e.Ref != "" {
+				continue // lintExitStatusRefs
+			}
 			at := &problem{kind: "spec", ptr: fmt.Sprintf("%s/exit_status/%d", ptr, i), loc: "command " + path}
 			switch {
 			case seen[e.Code]:

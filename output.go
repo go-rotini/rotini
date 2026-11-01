@@ -49,12 +49,15 @@ type OutputDef struct {
 	// the interface every kind's type satisfies, and Schema allows any kind.
 	Tag string
 	// Kinds lists each kind of item, in declared order, when Tag is set.
-	Kinds []OutputKind
+	Kinds []OutputKindDef
 }
 
-// OutputKind is one kind of item in a stream whose items come in several kinds: the value
+// Deprecated: use [OutputKindDef].
+type OutputKind = OutputKindDef
+
+// OutputKindDef is one kind of item in a stream whose items come in several kinds: the value
 // its tag property holds, its generated Go type and its shape.
-type OutputKind struct {
+type OutputKindDef struct {
 	// Value is what the item's tag property holds for this kind, such as "progress".
 	Value string
 	// Type is the kind's generated struct type.
@@ -65,7 +68,7 @@ type OutputKind struct {
 }
 
 // kindOfType returns the kind whose type is t, or a pointer to it; nil when there is none.
-func (o *OutputDef) kindOfType(t reflect.Type) *OutputKind {
+func (o *OutputDef) kindOfType(t reflect.Type) *OutputKindDef {
 	if t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -78,7 +81,7 @@ func (o *OutputDef) kindOfType(t reflect.Type) *OutputKind {
 }
 
 // kindOfValue returns the kind whose tag value is v; nil when there is none.
-func (o *OutputDef) kindOfValue(v string) *OutputKind {
+func (o *OutputDef) kindOfValue(v string) *OutputKindDef {
 	for i := range o.Kinds {
 		if o.Kinds[i].Value == v {
 			return &o.Kinds[i]
@@ -98,7 +101,7 @@ func (o *OutputDef) kindValues() string {
 
 // tagItem checks that v is one of out's kinds and returns its kind and v with the tag
 // property filled in when it was empty. A tag naming another kind is an internal error.
-func tagItem(name string, out *OutputDef, v any) (*OutputKind, any, error) {
+func tagItem(name string, out *OutputDef, v any) (*OutputKindDef, any, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() || (rv.Kind() == reflect.Pointer && rv.IsNil()) {
 		return nil, nil, InternalError(fmt.Errorf("%s: the item written is nil; write one of its kinds (%s)", name, out.kindValues()))
@@ -131,7 +134,7 @@ func tagItem(name string, out *OutputDef, v any) (*OutputKind, any, error) {
 // tagSelection is tagItem for a Selection of one of out's kinds: a selected tag that is empty is
 // filled in, and one naming another kind is an internal error. A tag left out of the selection
 // stays out.
-func tagSelection(name, tag string, kind *OutputKind, sel Selection) (Selection, error) {
+func tagSelection(name, tag string, kind *OutputKindDef, sel Selection) (Selection, error) {
 	m, ok := sel.data.(map[string]any)
 	if !ok {
 		return sel, nil

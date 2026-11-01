@@ -1,0 +1,19 @@
+# With validate.input_summaries, every flag and argument help lists has a summary.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    # Correct: a summary, and a hidden flag help doesn't list. No problem.
+    - name: verbose
+      summary: say more
+      schema: { type: bool }
+    - name: debug
+      hidden: true
+      schema: { type: bool }
+    # Wrong: help would list it with nothing beside it.
+    - name: quiet
+      schema: { type: bool }
+  arguments:
+    - name: target
+      schema: { type: string }

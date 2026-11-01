@@ -26,7 +26,7 @@ stderr 'invalid value "nope" for --json \(one of: due, id, status, title\)'
 
 # Help, completion and the contract know the fields.
 exec ./taskr$exe list --help
-stdout '--json \[\]string .*\[due\|id\|status\|title\]'
+stdout '--json string\.\.\. .*\[due\|id\|status\|title\]'
 stdout '--sort-by string .*\[due\|id\|status\|title\]'
 exec ./taskr$exe __complete list --json id,
 stdout '^id,due$'

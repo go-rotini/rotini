@@ -1,0 +1,303 @@
+# R16 — the two hook shapes and the author's own outcome channels, built and run. A parent
+# composes one child seeded as HandlerE stubs (hook_returns: error) and one seeded as plain
+# Handlers (no key): each child's wiring follows its own handlers, and both fail, tear down and
+# report the same way under the parent. Then the guide's channel blocks: records printed by the
+# default reporter, then read back typed by a reporter of the author's own. scan.go.txt and
+# report.go.txt are the guide's blocks.
+
+# ── two shapes under one parent ──────────────────────────────────────────────
+gomodinit example.com/demo
+exec rotini init acme
+exec rotini generate cmd/errkid/.rotini.spec.yaml --config cmd/errkid/.rotini.conf.yaml
+exec rotini generate cmd/voidkid/.rotini.spec.yaml --config cmd/voidkid/.rotini.conf.yaml
+grep '^var _ rotini.HandlerE = \(\*errkidHelloHandler\)\(nil\)$' internal/cmd/errkid/errkid_hello.go
+grep '^var _ rotini.Handler = \(\*voidkidHelloHandler\)\(nil\)$' internal/cmd/voidkid/voidkid_hello.go
+cp errkid_hello.go.txt internal/cmd/errkid/errkid_hello.go
+cp voidkid_hello.go.txt internal/cmd/voidkid/voidkid_hello.go
+grep 'return rotini.FromHandlerE\(&errkidHelloHandler\{\}\)' internal/cmd/errkid/zz_rotini.go
+! grep FromHandlerE internal/cmd/voidkid/zz_rotini.go
+
+exec rotini mount cmd/errkid/.rotini.spec.yaml cmd/voidkid/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+
+exec ./acme$exe errkid hello
+stdout '^hello from errkid$'
+stderr '^errkid: teardown$'
+exec ./acme$exe voidkid hello
+stdout '^hello from voidkid$'
+stderr '^voidkid: teardown$'
+
+# A failure stops Run's work, teardown still runs, and the error is reported once.
+wantexit 1 ./acme$exe errkid hello --fail
+! stdout .
+stderr '^errkid: teardown$'
+stderr -count=1 '^Error: errkid failed$'
+wantexit 1 ./acme$exe voidkid hello --fail
+! stdout .
+stderr '^voidkid: teardown$'
+stderr -count=1 '^Error: voidkid failed$'
+
+# An inputs error returned from a HandlerE keeps its command path.
+wantexit 1 ./acme$exe errkid hello --nope
+stderr -count=1 '^Error: acme errkid hello: unknown flag "--nope"$'
+
+# Changing a handler's shape takes a regenerate: the wiring follows the file.
+cp voidkid_hello_error.go.txt internal/cmd/voidkid/voidkid_hello.go
+! exec go build -o acme$exe ./cmd/acme
+stderr 'zz_rotini.go'
+exec rotini generate cmd/voidkid/.rotini.spec.yaml --config cmd/voidkid/.rotini.conf.yaml
+grep 'return rotini.FromHandlerE\(&voidkidHelloHandler\{\}\)' internal/cmd/voidkid/zz_rotini.go
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe voidkid hello
+stdout '^hello from voidkid, now a HandlerE$'
+
+# ── the guide's channel blocks ───────────────────────────────────────────────
+cd $WORK/scan
+gomodinit example.com/scan
+exec rotini generate cmd/scan/.rotini.spec.yaml --config cmd/scan/.rotini.conf.yaml
+cp $WORK/scan.go.txt internal/cmd/scan/scan.go
+exec go mod tidy
+exec go build -o scan$exe ./cmd/scan
+
+# The default reporter prints the records with the infos, and they don't fail the run.
+exec ./scan$exe a.txt a.bin b.bin
+stdout '^scanned a.txt$'
+stderr '^skipped a.bin: binary$'
+stderr '^skipped b.bin: binary$'
+
+# The author's reporter reads them back typed.
+cp $WORK/report.go.txt internal/cmd/scan/report.go
+cp $WORK/main_report.go.txt cmd/scan/main.go
+exec go build -o scan$exe ./cmd/scan
+exec ./scan$exe a.txt a.bin b.bin
+stdout '^scanned a.txt$'
+stderr '^2 skipped:$'
+stderr '^  a.bin    binary$'
+stderr '^  b.bin    binary$'
+! stderr 'skipped a.bin'
+exec ./scan$exe a.txt
+! stderr .
+
+-- cmd/errkid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: errkid
+  summary: a child whose handlers return errors
+  commands:
+    - name: hello
+      summary: say hello
+      flags:
+        - name: fail
+          identifiers: [--fail]
+          summary: fail instead
+          schema: { type: bool }
+-- cmd/errkid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/errkid/zz_rotini.go
+      hook_returns: error
+-- cmd/voidkid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: voidkid
+  summary: a child whose handlers return nothing
+  commands:
+    - name: hello
+      summary: say hello
+      flags:
+        - name: fail
+          identifiers: [--fail]
+          summary: fail instead
+          schema: { type: bool }
+-- cmd/voidkid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/voidkid/zz_rotini.go
+-- errkid_hello.go.txt --
+package errkid
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*errkidHelloHandler)(nil)
+
+type errkidHelloHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*errkidHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	inputs, err := rtx.Inputs[ErrkidHelloInputs]()
+	if err != nil {
+		return err
+	}
+	if inputs.ErrkidHello.Flags.Fail {
+		return errors.New("errkid failed")
+	}
+	_, err = fmt.Fprintln(rtx.Stdout, "hello from errkid")
+	return err
+}
+
+func (*errkidHelloHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
+	_, err := fmt.Fprintln(rtx.Stderr, "errkid: teardown")
+	return err
+}
+-- voidkid_hello.go.txt --
+package voidkid
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*voidkidHelloHandler)(nil)
+
+type voidkidHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*voidkidHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VoidkidHelloInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if inputs.VoidkidHello.Flags.Fail {
+		rtx.HaltWith(errors.New("voidkid failed"))
+		return
+	}
+	if _, err := fmt.Fprintln(rtx.Stdout, "hello from voidkid"); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func (*voidkidHelloHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, "voidkid: teardown")
+}
+-- voidkid_hello_error.go.txt --
+package voidkid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*voidkidHelloHandler)(nil)
+
+type voidkidHelloHandler struct{ rotini.NoHooksE }
+
+func (*voidkidHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	if _, err := rtx.Inputs[VoidkidHelloInputs](); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(rtx.Stdout, "hello from voidkid, now a HandlerE")
+	return err
+}
+-- scan/cmd/scan/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: scan
+  summary: scan files
+  arguments:
+    - name: paths
+      summary: the files to scan
+      schema: { type: '[]string' }
+-- scan/cmd/scan/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/scan/main.go
+    - type: cmd
+      file: internal/cmd/scan/zz_rotini.go
+      hook_returns: error
+-- scan.go.txt --
+package scan
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type Skipped struct{ Path, Reason string }
+
+func (s Skipped) String() string { return "skipped " + s.Path + ": " + s.Reason }
+
+var SkippedFiles = rotini.NewChannel[Skipped]("skipped", rotini.ChannelClassInfo)
+
+var _ rotini.HandlerE = (*scanHandler)(nil)
+
+type scanHandler struct{ rotini.NoHooksE }
+
+func (*scanHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	inputs, err := rtx.Inputs[ScanInputs]()
+	if err != nil {
+		return err
+	}
+
+	for _, path := range inputs.Scan.Arguments.Paths {
+		if strings.HasSuffix(path, ".bin") {
+			rtx.Record(SkippedFiles, Skipped{Path: path, Reason: "binary"})
+			continue
+		}
+		if _, err := fmt.Fprintln(rtx.Stdout, "scanned", path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+-- report.go.txt --
+package scan
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Report lists the skipped files as a table, then the errors.
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	if skipped := out.Records(SkippedFiles); len(skipped) > 0 {
+		fmt.Fprintf(rtx.Stderr, "%d skipped:\n", len(skipped))
+		for _, s := range skipped {
+			fmt.Fprintf(rtx.Stderr, "  %-8s %s\n", s.Path, s.Reason)
+		}
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	if out.Failed() {
+		rtx.Exit(1)
+	}
+}
+-- main_report.go.txt --
+package main
+
+import cmd "example.com/scan/internal/cmd/scan"
+
+func main() {
+	cmd.NewProgram().WithReporter(cmd.Report).Execute()
+}

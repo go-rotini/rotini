@@ -74,31 +74,55 @@ func eachOwnPrefix(spec *Spec, visit func(c *Command, path, ptr, prefix, prev st
 // lintGeneratedNames rejects two spec entries whose generated top-level Go names coincide,
 // where neither is a clash of command prefixes (commandPrefixClashes reports those): a
 // command's suffixed types (<Prefix>Inputs, <Prefix>CommandInputs, ...) against another's, a
-// named schema against them, an exit constant against them, and any of these against the
-// fixed names the cmd file declares, including the enabled doc features' resolvers and
-// variables. Generate would refuse the same code without a position.
+// named schema or a channel's record type or handle against them, an exit constant, an enum
+// value constant or a name constant (config file, key, profile, env variable) against them,
+// and any of these against the fixed names the cmd file declares, including the enabled doc
+// features' resolvers and variables. Generate would refuse the same code without a position.
 func lintGeneratedNames(spec *Spec, conf *Conf) []error {
 	if spec == nil || spec.Command.Name == "" {
 		return nil
 	}
 	var problems []error
+	taken := generatedGoNames(spec, conf, func(p *problem) { problems = append(problems, p) })
+	groups := mergeConstGroups(append(inputEnumGroups(spec), nameGroups(spec, spec.Command.EnvPrefix)...))
+	_, clashes := withoutClashes(groups, taken)
+	for _, c := range clashes {
+		problems = append(problems, &problem{kind: "spec", ptr: c.ptr, loc: c.loc, sev: severityWarning, msg: c.msg})
+	}
+	return problems
+}
+
+// generatedGoNames maps each top-level Go name the cmd file declares for spec, other than the
+// enum and name constants, to what declares it, reporting each name two entries make.
+func generatedGoNames(spec *Spec, conf *Conf, report func(*problem)) map[string]string {
 	taken := map[string]string{} // name -> what declares it
 	// claim records name for owner; own is how the subject's message names it.
 	claim := func(name, own, owner, ptr, loc string) {
 		if prev, dup := taken[name]; dup {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: loc, msg: fmt.Sprintf(
+			report(&problem{kind: "spec", ptr: ptr, loc: loc, msg: fmt.Sprintf(
 				"generates the Go name %s (%s), which %s also declares; rename one", name, own, prev)})
 			return
 		}
 		taken[name] = owner
 	}
 	features := fixedGoNames(conf, taken)
+	if specHasExamples(spec) {
+		taken["Examples"] = "the generated Examples variable, which lists the spec's examples"
+	}
 	schemas := spec.Command.Schemas
 	for _, name := range slices.Sorted(maps.Keys(schemas)) {
 		if name == "Usage" {
 			continue // lintUsageSchemaName's to report
 		}
 		claim(name, "its type", fmt.Sprintf("schema %q", name), rootPointer+"/schemas/"+name, fmt.Sprintf("%s schema %q", rootLabel(spec), name))
+	}
+	for i, c := range spec.Command.Channels {
+		if c.Name == "" {
+			continue
+		}
+		ptr, loc := fmt.Sprintf("%s/channels/%d", rootPointer, i), fmt.Sprintf("%s channel %q", rootLabel(spec), c.Name)
+		claim(channelRecordType(c.Name), "its record type", fmt.Sprintf("channel %q's record type", c.Name), ptr, loc)
+		claim(channelHandle(c.Name), "its handle", fmt.Sprintf("channel %q's handle", c.Name), ptr, loc)
 	}
 	eachOwnPrefix(spec, func(c *Command, path, ptr, prefix, prev string) {
 		if prev != "" {
@@ -115,12 +139,27 @@ func lintGeneratedNames(spec *Spec, conf *Conf) []error {
 		}
 		for i, e := range c.ExitStatus {
 			if e.Name != "" {
-				claim(prefix+"Exit"+toPascalCase(e.Name), fmt.Sprintf("its exit constant for %q", e.Name),
+				claim(prefix+"Exit"+constCase(toPascalCase(e.Name)), fmt.Sprintf("its exit constant for %q", e.Name),
 					fmt.Sprintf("command %s's exit constant for %q", path, e.Name), fmt.Sprintf("%s/exit_status/%d", ptr, i), loc)
 			}
 		}
 	})
-	return problems
+	return taken
+}
+
+// specHasExamples reports whether a command of spec declares an example the cmd file lists in
+// its Examples variable: one that runs the program with literal words.
+func specHasExamples(spec *Spec) bool {
+	program := exampleProgramWords(spec)
+	found := false
+	walkCommandsAt(spec, func(c *Command, _, _ string) {
+		for _, ex := range examplesOf(c.Examples) {
+			if _, ok := exampleRunArgv(ex.Run, program); ok {
+				found = true
+			}
+		}
+	})
+	return found
 }
 
 // commandTypeSuffixes lists the suffixes of the types generated under c's prefix.
@@ -211,8 +250,8 @@ func inputFieldClashes(spec *Spec, c *Command, path, ptr string) []error {
 	return problems
 }
 
-// propertyNameProblems reports object-schema properties, in named schemas, outputs and stdin
-// payloads, that clash on one generated field or can't make a field and json tag at all. The
+// propertyNameProblems reports object-schema properties, in named schemas, channel records,
+// outputs and stdin payloads, that clash on one generated field or can't make a field and json tag at all. The
 // fields are the ones the schema generator really makes.
 func propertyNameProblems(spec *Spec) []error {
 	type object struct {
@@ -235,6 +274,9 @@ func propertyNameProblems(spec *Spec) []error {
 	schemas := spec.Command.Schemas
 	for _, name := range slices.Sorted(maps.Keys(schemas)) {
 		tree(fmt.Sprintf("%s schema %q", rootLabel(spec), name), rootPointer+"/schemas/"+name, schemas[name].BaseSchema)
+	}
+	for i, c := range spec.Command.Channels {
+		tree(fmt.Sprintf("%s channel %q", rootLabel(spec), c.Name), fmt.Sprintf("%s/channels/%d/schema", rootPointer, i), c.Schema.BaseSchema)
 	}
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		for _, s := range outputShapesAt(c.Output, ptr+"/output") {

@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -71,8 +72,13 @@ func TestTypeDocsMapEveryMethod(t *testing.T) {
 
 			var missing []string
 			for _, m := range dt.Methods {
-				// A doc link or the bare qualified name in the prose both count as placed.
-				if !strings.Contains(dt.Doc, typeName+"."+m.Name) {
+				if strings.HasPrefix(m.Doc, "Deprecated:") {
+					continue // a kept old name is not part of the map
+				}
+				// A doc link or the bare qualified name in the prose both count as placed. The
+				// name must stand alone: Context.RecordInfo does not place Context.Record.
+				placed := regexp.MustCompile(`\b` + regexp.QuoteMeta(typeName+"."+m.Name) + `\b`)
+				if !placed.MatchString(dt.Doc) {
 					missing = append(missing, m.Name)
 				}
 			}

@@ -197,7 +197,7 @@ func TestCLI_importWarnsWithoutRuntime(t *testing.T) {
 	if out.String() != "spec: s\nconf: c\ndone\n" {
 		t.Errorf("stdout = %q", out.String())
 	}
-	if want := "Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get github.com/go-rotini/rotini` before building the imported CLI"; !strings.Contains(errb.String(), want) {
+	if want := "Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get -tool github.com/go-rotini/rotini/cmd/rotini` before building the imported CLI"; !strings.Contains(errb.String(), want) {
 		t.Errorf("stderr = %q, want %q", errb.String(), want)
 	}
 

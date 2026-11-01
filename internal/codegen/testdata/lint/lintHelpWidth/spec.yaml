@@ -1,0 +1,19 @@
+# With validate.help_width, each line of help text you wrote fits in that many characters.
+version: 0.0.0
+command:
+  name: demo
+  # Correct: short lines. No problem.
+  summary: a short summary
+  # Wrong: a long line, a long second line, a long example and a long flag summary.
+  description: This description has one line that is much longer than forty characters.
+  footer: |-
+    A short first line.
+    A second line that runs on well past forty characters.
+  examples:
+    - demo --verbose
+    - run: demo --verbose --verbose --verbose --verbose
+      summary: Say a great deal more than usual about it
+  flags:
+    - name: verbose
+      summary: say more about what happens, at every step, as it happens
+      schema: { type: count }

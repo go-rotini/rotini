@@ -26,16 +26,16 @@ func featureNames(fs []Feature) []string {
 
 func TestFeature_String(t *testing.T) {
 	got := featureNames([]Feature{
-		Plugins(), ResponseFiles(), Chdir(), Multicall(), Stdin("json", "yaml"), Env(), ConfigFiles(), Profiles(),
+		Plugins(), ResponseFiles(), Chdir(), Multicall(), Stdin("json", "yaml"), Env(), NestedEnv(), ConfigFiles(), Profiles(),
 		EnvFiles(), Fallbacks(), PathExpansion(), ObjectFlags(), Schemas(), JSON(), YAML(), TOML(), JSONC(), Dotenv(),
-		Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(), URLValues(), EmailValues(),
+		Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(), TimeValues(), URLValues(), EmailValues(),
 		TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),
 	})
 	want := []string{
-		"plugins", "response-files", "chdir", "multicall", "stdin(json,yaml)", "env", "config-files", "config-profiles",
+		"plugins", "response-files", "chdir", "multicall", "stdin(json,yaml)", "env", "nested-env", "config-files", "config-profiles",
 		"env-files", "fallbacks", "path-expansion", "object-flags", "schemas", "codec:json", "codec:yaml", "codec:toml",
 		"codec:jsonc", "codec:dotenv", "bounds", "unique-items", "patterns", "flag-groups", "flag-dependencies", "stream-paths",
-		"values:url", "values:email", "values:timezone", "values:mac", "values:ip", "values:regexp",
+		"values:time", "values:url", "values:email", "values:timezone", "values:mac", "values:ip", "values:regexp",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("names = %q\nwant    %q", got, want)
@@ -51,7 +51,7 @@ func hookSlots(s *featureSet) []bool {
 		s.plugins != nil, s.respFiles != nil, s.chdir != nil, s.multicall != nil, s.stdin != nil, s.env != nil,
 		s.config != nil, s.profiles != nil, s.envFiles != nil, s.fallbacks != nil, s.channels != nil, s.expand != nil,
 		s.objects != nil, s.schemas != nil, s.bounds != nil, s.unique != nil, s.patterns != nil, s.groups != nil, s.deps != nil,
-		s.streamPaths != nil,
+		s.streamPaths != nil, s.families != nil, s.times != nil,
 	}
 }
 

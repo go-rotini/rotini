@@ -74,7 +74,7 @@ exec go build -o todo$exe ./cmd/todo
 exec ./todo$exe list --json id,title --sort-by title
 cmp stdout select.json
 exec ./todo$exe list --help
-stdout '--json \[\]string .*\[id\|status\|title\]'
+stdout '--json string\.\.\. .*\[id\|status\|title\]'
 
 -- list.table --
 ID  STATUS  TITLE
@@ -197,14 +197,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoBriefHandler struct{ rotini.NoHooks }
+type todoBriefHandler struct{ rotini.NoHooksE }
 
-func (*todoBriefHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoBriefHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if _, err := rtx.Inputs[TodoBriefInputs](); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintln(rtx.Stdout, "ran")
+	return nil
 }
 -- cmd/todo/.rotini.conf.yaml --
 version: 0.0.0
@@ -220,6 +220,7 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error
   features:
     - type: help
       enabled: true
@@ -273,18 +274,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoListHandler struct{ rotini.NoHooks }
+type todoListHandler struct{ rotini.NoHooksE }
 
 -- list_write.go.txt --
-func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoListInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if err := rtx.WriteOutput(TodoListOutput{Tasks: load()}, in.Todo.Flags.Output, renderTable); err != nil {
-		rtx.HaltWith(err)
+		return err
 	}
+
+	return nil
 }
 
 func renderTable(w io.Writer, format string, v TodoListOutput) error {
@@ -319,7 +321,7 @@ import (
 	"github.com/go-rotini/rotini/shape"
 )
 
-type todoListHandler struct{ rotini.NoHooks }
+type todoListHandler struct{ rotini.NoHooksE }
 
 -- list_head_select.go.txt --
 package todo
@@ -330,43 +332,38 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type todoListHandler struct{ rotini.NoHooks }
+type todoListHandler struct{ rotini.NoHooksE }
 
 -- list_run_head.go.txt --
-func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoListInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 -- list_run_tail.go.txt --
 }
 -- list_template.go.txt --
 list := TodoListOutput{Tasks: load()}
 if format := in.Todo.Flags.Format; !format.IsZero() {
-	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
-	return
+	return rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format))
 }
-rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+return rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable)
 -- list_select.go.txt --
 list := TodoListOutput{Tasks: load()}
 flags := in.TodoList.Flags
 if flags.SortBy != "" {
 	if err := rotini.SortBy(list.Tasks, flags.SortBy, flags.Reverse); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 }
 if len(flags.JSON) > 0 {
 	sel, err := rotini.SelectFields(list, "tasks", flags.JSON)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
-	rtx.HaltWith(rtx.WriteOutput(sel, "json", nil))
-	return
+	return rtx.WriteOutput(sel, "json", nil)
 }
-rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+return rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable)
 -- todo_test.go.txt --
 package todo
 

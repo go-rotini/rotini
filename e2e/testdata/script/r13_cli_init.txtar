@@ -2,6 +2,13 @@
 # replaces and keeps, what a dry run reports, the handlers a forced init disables so the project
 # builds, and the notices it prints the way generate does.
 
+# ── with no go.mod, init fails and says to make one ──────────────────────────
+mkdir nomod
+cd nomod
+! exec rotini init demo
+stderr 'go\.mod not found in any parent of working directory; run `go mod init <module>` first$'
+cd ..
+
 # ── a module that doesn't require the runtime gets the warning, and init still succeeds ──
 mkdir bare
 cd bare
@@ -10,10 +17,18 @@ exec rotini init demo
 stdout '^spec: cmd/demo/\.rotini\.spec\.yaml$'
 stdout '^conf: cmd/demo/\.rotini\.conf\.yaml$'
 stdout '^\[\d\d:\d\d:\d\d\] \S+$'
-stderr '^Warning: go\.mod does not require github\.com/go-rotini/rotini yet; run `go get github\.com/go-rotini/rotini` before building \./cmd/demo$'
+stderr '^Warning: go\.mod does not require github\.com/go-rotini/rotini yet; run `go get -tool github\.com/go-rotini/rotini/cmd/rotini` before building \./cmd/demo \(it adds the package and the tool the go:generate line runs\)$'
 cd ..
 
-# ── a module that requires it gets no warning ───────────────────────────────
+# ── a module that requires the runtime but not the tool gets the go generate warning ──
+mkdir lib
+cd lib
+cp ../libmod/go.mod go.mod
+exec rotini init demo
+stderr '^Warning: go\.mod has no tool line for github\.com/go-rotini/rotini/cmd/rotini, which the go:generate line runs as `go tool rotini`; run `go get -tool github\.com/go-rotini/rotini/cmd/rotini` before go generate$'
+cd ..
+
+# ── a module that declares the tool gets no warning ─────────────────────────
 gomodinit example.com/demo
 exec rotini init demo
 ! stderr .
@@ -114,3 +129,9 @@ import (
 func main() {
 	cmd.NewProgram().Execute()
 }
+-- libmod/go.mod --
+module example.com/lib
+
+go 1.27
+
+require github.com/go-rotini/rotini v1.0.0

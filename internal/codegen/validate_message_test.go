@@ -60,6 +60,15 @@ func TestHumanizeSchemaError(t *testing.T) {
 			want: `a command needs either "name" or "$ref"`,
 		},
 		{
+			name: "a const names the one value allowed",
+			err: jsonschema.ValidationError{
+				Keyword: "const", InstanceLocation: "/command/commands/0/exit_status/0/inherit",
+				KeywordLocation: "#/definitions/ExitStatusEntry/properties/inherit/const",
+				Message:         "value does not match const",
+			},
+			want: `"inherit" must be true`,
+		},
+		{
 			name: "an anyOf of something other than required keys is left alone",
 			err: jsonschema.ValidationError{
 				Keyword: "anyOf", InstanceLocation: "/x", KeywordLocation: "#/definitions/Thing/anyOf",

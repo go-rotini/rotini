@@ -36,7 +36,7 @@ stderr '^panic: boom'
 stderr 'todoBoomHandler\)\.Run'
 env TODO_PANIC=
 
-# A dependency MustGetDependency can't find reaches the reporter as a panic.
+# A dependency MustDependency can't find reaches the reporter as a panic.
 wantexit 1 ./todo$exe dep
 stderr '^Fatal Error: .*todo\.store'
 
@@ -61,26 +61,28 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoHandler)(nil)
+var _ rotini.HandlerE = (*todoHandler)(nil)
 
 -- timeout.go.txt --
 type todoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
 	cancel context.CancelFunc
 }
 
-func (h *todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (h *todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	ctx, h.cancel = context.WithTimeout(ctx, 30*time.Second)
 	rtx.SetContext(ctx)
+	return nil
 }
 
-func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
 	h.cancel()
+	return nil
 }
 -- root_tail.go.txt --
 
-func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) error { return nil }
 -- cmd/todo/.rotini.spec.yaml --
 version: 0.0.0
 command:
@@ -102,6 +104,7 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error
 -- cmd/todo/main.go --
 package main
 
@@ -149,20 +152,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoBoomHandler)(nil)
+var _ rotini.HandlerE = (*todoBoomHandler)(nil)
 
 type todoBoomHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	panic("boom")
+	return nil
 }
 
-func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stdout, "teardown")
+	return nil
 }
 -- internal/cmd/todo/todo_dep.go --
 package todo
@@ -173,14 +178,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoDepHandler)(nil)
+var _ rotini.HandlerE = (*todoDepHandler)(nil)
 
 var storeDep = rotini.NewDependency[string]("todo.store")
 
-type todoDepHandler struct{ rotini.NoHooks }
+type todoDepHandler struct{ rotini.NoHooksE }
 
-func (*todoDepHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	_ = rtx.MustGetDependency(storeDep)
+func (*todoDepHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	_ = rtx.MustDependency(storeDep)
+	return nil
 }
 -- internal/cmd/todo/todo_deadline.go --
 package todo
@@ -192,13 +198,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoDeadlineHandler)(nil)
+var _ rotini.HandlerE = (*todoDeadlineHandler)(nil)
 
-type todoDeadlineHandler struct{ rotini.NoHooks }
+type todoDeadlineHandler struct{ rotini.NoHooksE }
 
-func (*todoDeadlineHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoDeadlineHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	_, ok := ctx.Deadline()
 	fmt.Fprintln(rtx.Stdout, "deadline:", ok)
+	return nil
 }
 -- internal/cmd/todo/todo_wait.go --
 package todo
@@ -211,15 +218,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoWaitHandler)(nil)
+var _ rotini.HandlerE = (*todoWaitHandler)(nil)
 
-type todoWaitHandler struct{ rotini.NoHooks }
+type todoWaitHandler struct{ rotini.NoHooksE }
 
-func (*todoWaitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoWaitHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	select {
 	case <-ctx.Done():
 		fmt.Fprintln(rtx.Stdout, "canceled")
 	case <-time.After(10 * time.Second):
 		fmt.Fprintln(rtx.Stdout, "not canceled")
 	}
+
+	return nil
 }

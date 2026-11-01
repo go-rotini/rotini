@@ -25,6 +25,7 @@ func (d *differ) document() {
 	d.topics()
 	d.completion()
 	d.responseFiles()
+	d.channels()
 	d.definitions()
 	d.commands()
 }
@@ -540,7 +541,11 @@ func (d *differ) exits(st stability, oc, nc *command) {
 		w := oc.Name + " exit " + strconv.Itoa(oe.Code)
 		i := slices.IndexFunc(nc.ExitStatus, func(e exitStatus) bool { return e.Code == oe.Code })
 		if i < 0 {
-			d.add(st, PossiblyBreaking, RuleExitStatusNoDelete, w, "exit status no longer documented", "")
+			note := ""
+			if oc.ExitStatusInherited && !nc.ExitStatusInherited {
+				note = "the command's own exit_status now replaces the root's"
+			}
+			d.add(st, PossiblyBreaking, RuleExitStatusNoDelete, w, "exit status no longer documented", note)
 			continue
 		}
 		ne := nc.ExitStatus[i]

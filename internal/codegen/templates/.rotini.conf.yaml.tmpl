@@ -11,6 +11,7 @@ generate:
       file: cmd/{{.Package}}/main.go
     - type: cmd
       file: internal/cmd/{{.Package}}/zz_rotini.go
+      hook_returns: error
   features:
     # help is on so `{{.Package}} --help` works from the first build. The other three
     # are opt-in; flip `enabled` to turn one on.

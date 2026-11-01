@@ -146,16 +146,16 @@ func TestLocalFlag_argvOf(t *testing.T) {
 
 	v.AppDb.Flags.Dsn = "x"
 	_, _, err = ArgvOf(localDef(), v, PresenceOf(v), ArgvPath("db", "migrate"))
-	var ae *ArgvError
+	var ae *ArgvOfError
 	if !errors.As(err, &ae) || ae.Field != "AppDb.Flags.Dsn" || !strings.Contains(ae.Reason, `"db" is the command run`) {
-		t.Fatalf("err = %v, want an ArgvError for AppDb.Flags.Dsn", err)
+		t.Fatalf("err = %v, want an ArgvOfError for AppDb.Flags.Dsn", err)
 	}
 }
 
 // An ancestor's local flag gives no completion hint under a sub-command, inline or not.
 func TestLocalFlag_completionHint(t *testing.T) {
 	def := localDef()
-	def.Commands[0].Flags[0].Complete = Completion{Kind: "file"}
+	def.Commands[0].Flags[0].Complete = CompletionHint{Kind: "file"}
 	p := NewProgram(def, nil)
 	if got := resultOf(t, p, "db", "--dsn="); got.Hint.Kind != "file" {
 		t.Errorf("--dsn= on db: hint %q, want file", got.Hint.Kind)

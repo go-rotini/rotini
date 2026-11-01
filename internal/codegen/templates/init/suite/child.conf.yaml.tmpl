@@ -10,6 +10,7 @@ generate:
   packages:
     - type: cmd
       file: internal/cmd/{{.Child}}/zz_rotini.go
+      hook_returns: error
   features:
     - type: help
       enabled: true

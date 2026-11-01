@@ -51,8 +51,8 @@ func (d Deprecation) Error() string {
 //		rtx.RecordWarning(d)
 //	}
 //
-// It needs no [Parser]: it reads the resolved chain and argv from rtx, and never reads a file
-// or stdin. It returns nil for a nil rtx or one with no resolved command. When argv does not
+// It reads the resolved chain and the command line from rtx, through the program's
+// [ArgvParser] when it sets one, and never reads a file or stdin. It returns nil for a nil rtx or one with no resolved command. When argv does not
 // parse, only command deprecations are reported.
 func Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
@@ -62,9 +62,8 @@ func Deprecations(rtx *Context) []Deprecation {
 	if len(chain) == 0 {
 		return nil
 	}
-	argv := rtx.Argv
 	var out []Deprecation
-	store := quietParse(chain, argv)
+	store := rtx.quietArgv(chain)
 	for i, frame := range chain {
 		// A command deprecated as a whole reports however it was invoked; one with only
 		// deprecated aliases reports when one of those resolved it (frame.Matched).

@@ -54,7 +54,11 @@ func reflectLookup(handlers any) HandlerLookup {
 		if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
 			return nil, false
 		}
-		h, _ := reflect.TypeAssert[Handler](m.Call(nil)[0])
+		v := m.Call(nil)[0]
+		if eh, ok := reflect.TypeAssert[HandlerE](v); ok {
+			return FromHandlerE(eh), true
+		}
+		h, _ := reflect.TypeAssert[Handler](v)
 		return h, true
 	}
 }

@@ -8,7 +8,7 @@ exec go mod tidy
 exec go build -o busybox$exe ./cmd/busybox
 
 # The prefix is stripped before the name is matched: acme-ls runs `busybox ls`.
-cp busybox$exe acme-ls$exe
+exec go build -o acme-ls$exe ./cmd/busybox
 exec ./acme-ls$exe -l
 stdout '^ls ran: long=true$'
 
@@ -19,15 +19,15 @@ exec ./acme-ls$exe --help
 stdout '^  busybox ls \[flags\]$'
 
 # A name that matches no top-level command, the root's own included, runs the root.
-cp busybox$exe acme-busybox$exe
+exec go build -o acme-busybox$exe ./cmd/busybox
 exec ./acme-busybox$exe
 stdout '^root ran$'
-cp busybox$exe ls$exe
+exec go build -o ls$exe ./cmd/busybox
 exec ./ls$exe
 stdout '^root ran$'
 
 # On Windows names match without regard to case.
-[windows] cp busybox$exe ACME-LS.EXE
+[windows] exec go build -o ACME-LS.EXE ./cmd/busybox
 [windows] exec ./ACME-LS.EXE
 [windows] stdout '^ls ran: long=false$'
 

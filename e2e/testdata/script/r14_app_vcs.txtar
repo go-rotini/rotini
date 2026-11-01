@@ -99,7 +99,7 @@ stdout '^  vcs remote remove <name>$'
 exec ./vcs$exe help revisions
 stdout '^A revision is a commit number'
 wantexit 1 ./vcs$exe help nope
-stderr '^Error: no help for command "nope"$'
+stderr '^Error: vcs: unknown command "nope"$'
 exec ./vcs$exe gc --help
 stdout '^This command is experimental: it may change or be removed in any release\.$'
 stdout '\(deprecated since 0\.2\.0, removed in 1\.0\.0: it is always aggressive now\)$'
@@ -111,7 +111,7 @@ stdout '^\.SH "EXIT STATUS"$'
 exec ./vcs$exe man commit
 stdout '^\.SH "GLOBAL OPTIONS"$'
 wantexit 1 ./vcs$exe man nope
-stderr '^Error: no man page for command "nope"$'
+stderr '^Error: vcs: unknown command "nope"$'
 
 # Completion: hidden and deprecated names are left out, a set digit option takes its group
 # with it, and the flag a dependency requires comes first.
@@ -232,6 +232,7 @@ generate:
       file: cmd/vcs/main.go
     - type: cmd
       file: internal/cmd/vcs/zz_rotini.go
+      hook_returns: error
   features:
     # help is on so `vcs --help` works from the first build. The other three
     # are opt-in; flip `enabled` to turn one on.
@@ -924,19 +925,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsHandler)(nil)
+var _ rotini.HandlerE = (*vcsHandler)(nil)
 
 type vcsHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*vcsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	argv, err := rtx.ArgvInputs[VcsInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	inputs := argv.Values
 
@@ -952,17 +952,15 @@ func (*vcsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	if inputs.Vcs.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
 
 	if inputs.Vcs.Flags.Version {
@@ -972,23 +970,24 @@ func (*vcsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
+
+	return nil
 }
 
-func (*vcsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if _, err := rtx.Inputs[VcsInputs](); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- vcs_commit.go.txt --
 package vcs
@@ -1001,26 +1000,24 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsCommitHandler)(nil)
+var _ rotini.HandlerE = (*vcsCommitHandler)(nil)
 
 type vcsCommitHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsCommitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsCommitHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsCommitInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	f := inputs.VcsCommit.Flags
 	cs, err := readCommits(rtx)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	date := f.Date
 	if date.IsZero() {
@@ -1035,8 +1032,7 @@ func (*vcsCommitHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	if f.Amend {
 		if len(cs) == 0 {
-			rtx.HaltWith(errors.New("nothing to amend"))
-			return
+			return errors.New("nothing to amend")
 		}
 		c.N = cs[len(cs)-1].N
 		if c.Message == "" {
@@ -1045,15 +1041,14 @@ func (*vcsCommitHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		cs = cs[:len(cs)-1]
 	}
 	if f.Verify && c.Message == "WIP" {
-		rtx.HaltWith(errors.New("pre-commit check failed: WIP commits are not allowed (use --no-verify)"))
-		return
+		return errors.New("pre-commit check failed: WIP commits are not allowed (use --no-verify)")
 	}
 	cs = append(cs, c)
 	if err := writeCommits(rtx, cs); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintf(rtx.Stdout, "[%d] %s\n", c.N, c.Message)
+	return nil
 }
 -- vcs_diff.go.txt --
 package vcs
@@ -1065,20 +1060,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsDiffHandler)(nil)
+var _ rotini.HandlerE = (*vcsDiffHandler)(nil)
 
 type vcsDiffHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsDiffHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsDiffInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	revs := inputs.VcsDiff.Arguments.Revisions
 	var paths []string
@@ -1086,6 +1080,7 @@ func (*vcsDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		revs, paths = revs[:i], revs[i:]
 	}
 	fmt.Fprintf(rtx.Stdout, "revisions=%q paths=%q\n", revs, paths)
+	return nil
 }
 -- vcs_init.go.txt --
 package vcs
@@ -1099,34 +1094,33 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsInitHandler)(nil)
+var _ rotini.HandlerE = (*vcsInitHandler)(nil)
 
 type vcsInitHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsInitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsInitHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsInitInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	dir := inputs.VcsInit.Arguments.Directory
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(rtx.Dir(), dir)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".vcs"), 0o755); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	kind := "repository"
 	if inputs.VcsInit.Flags.Bare {
 		kind = "bare repository"
 	}
 	fmt.Fprintf(rtx.Stdout, "initialized empty %s in %s\n", kind, filepath.Join(inputs.VcsInit.Arguments.Directory, ".vcs"))
+	return nil
 }
 -- vcs_log.go.txt --
 package vcs
@@ -1140,26 +1134,24 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsLogHandler)(nil)
+var _ rotini.HandlerE = (*vcsLogHandler)(nil)
 
 type vcsLogHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsLogHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsLogHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsLogInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	f := inputs.VcsLog.Flags
 	cs, err := readCommits(rtx)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	slices.Reverse(cs)
 	shown := 0
@@ -1187,6 +1179,8 @@ func (*vcsLogHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if len(inputs.VcsLog.Arguments.Paths) > 0 {
 		fmt.Fprintf(rtx.Stdout, "paths: %s\n", strings.Join(inputs.VcsLog.Arguments.Paths, ","))
 	}
+
+	return nil
 }
 -- vcs_man.go.txt --
 package vcs
@@ -1198,30 +1192,30 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsManHandler)(nil)
+var _ rotini.HandlerE = (*vcsManHandler)(nil)
 
 type vcsManHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsManHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsManHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsManInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	page, err := Man(inputs.VcsMan.Arguments.Command...)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if _, err := fmt.Fprint(rtx.Stdout, page); err != nil {
-		rtx.HaltWith(err)
+		return err
 	}
+
+	return nil
 }
 -- vcs_run.go.txt --
 package vcs
@@ -1235,20 +1229,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*vcsRunHandler)(nil)
+var _ rotini.HandlerE = (*vcsRunHandler)(nil)
 
 type vcsRunHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*vcsRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vcsRunHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[VcsRunInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	a := inputs.VcsRun.Arguments
 	dash, _ := rtx.DashIndex()
@@ -1257,6 +1250,7 @@ func (*vcsRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		fmt.Fprintf(rtx.Stdout, "env %s=%s\n", k, env[k])
 	}
 	fmt.Fprintf(rtx.Stdout, "program=%q args=%q dash=%d\n", a.Program, a.Args, dash)
+	return nil
 }
 -- want-bad.txt --
 Warning: spec: bad.spec.yaml:31:11: command vcs/commit: flag "helpme": identifier "-h" is also flag "help" on command vcs, which short-circuits; after "commit" it means this flag instead, and only "--help" still reaches flag "help" there. Use another identifier for -h

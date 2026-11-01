@@ -3,7 +3,6 @@ package rotini
 import (
 	"errors"
 	"io"
-	"os"
 )
 
 // OpenInput opens an input-file value (a spec's `type: inputfile`) for reading:
@@ -13,8 +12,9 @@ import (
 //     open. When stdin is a terminal, OpenInput returns a usage error rather than wait for
 //     typing. A read that the run's signal interrupts returns an [*InputError] and stops the
 //     run with the signal's exit code.
-//   - Any other path is opened relative to the run's directory ([Context.Dir]); a file that
-//     cannot be opened is a usage error naming the path as given.
+//   - Any other path is opened relative to the run's directory ([Context.Dir]), from the run's
+//     file system ([Program.WithFS]); a file that cannot be opened is a usage error naming the
+//     path as given.
 //
 // A handler for `cat [FILE...]` reads each value in turn, treating no files as "-":
 //
@@ -44,14 +44,15 @@ func OpenInput(rtx *Context, path string) (io.ReadCloser, error) {
 		r := rtx.stdinStream() // a stdin that isn't piped (/dev/null) reads as empty
 		return io.NopCloser(r), nil
 	}
-	full := rtx.osView().abs(path)
-	f, err := os.Open(full)
+	view := rtx.osView()
+	full := view.abs(path)
+	f, err := view.open(full)
 	if err != nil {
-		return nil, UsageError(&pathError{msg: unreadableFile(path, full, err), err: err})
+		return nil, UsageError(&pathError{msg: unreadableFile(view, path, full, err), err: err})
 	}
 	if info, err := f.Stat(); err == nil && info.IsDir() {
 		_ = f.Close()
-		return nil, UsageError(&pathError{msg: unreadableFile(path, full, errIsDir)})
+		return nil, UsageError(&pathError{msg: unreadableFile(view, path, full, errIsDir)})
 	}
 	return f, nil
 }

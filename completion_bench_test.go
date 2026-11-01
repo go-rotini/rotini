@@ -9,7 +9,7 @@ func BenchmarkCompletionHintDiscovery(b *testing.B) {
 		Name:            "app",
 		PluginDiscovery: &PluginDiscoveryDef{Prefix: "app-"},
 		PluginPath:      b.TempDir(),
-		Arguments:       []ArgDef{{Name: "n", Type: "string", Complete: Completion{Kind: "file"}}},
+		Arguments:       []ArgDef{{Name: "n", Type: "string", Complete: CompletionHint{Kind: "file"}}},
 		Commands:        []CommandDef{{Name: "sub"}},
 	}
 	for b.Loop() {

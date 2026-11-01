@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // This file derives the generated struct fields from a command's Inputs and maps schema
@@ -34,20 +36,28 @@ func flagFields(in *Inputs, envPrefix string) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Flags))
 	for _, f := range in.Flags {
-		key := flagReconKey(f.Name, f.Schema)
-		fields = append(fields, fieldDef{
-			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
-			Import: fieldImport(f.Schema), Recon: key,
-			// The env fallback is pinned at generate time; see [envVarFor].
-			EnvVar:     flagEnvVar(f.Schema, key, envPrefix),
-			Comment:    contractComment(f.Schema),
-			Constraint: expansionTags(f.Schema),
-		})
-		if key != "" && f.Schema.VariableFile != "" {
-			fields[len(fields)-1].EnvFile = f.Schema.VariableFile
-		}
+		fields = append(fields, argvField(f.Name, f.Summary, f.Deprecated, f.Schema, envPrefix))
 	}
 	return fields
+}
+
+// argvField is the struct field of a flag or an argument. One with an env or config fallback
+// carries its recon and env tags; the env fallback is pinned at generate time (see
+// [envVarFor]).
+func argvField(name, summary, deprecated string, schema *InputSchema, envPrefix string) fieldDef {
+	key := flagReconKey(name, schema)
+	fd := fieldDef{
+		Field: toPascalCase(name), GoType: goFieldType(schema), Tag: name,
+		Import: fieldImport(schema), Recon: key,
+		EnvVar:     flagEnvVar(schema, key, envPrefix),
+		Comment:    contractComment(schema),
+		Constraint: expansionTags(schema),
+		Doc:        fieldDoc(summary, deprecated),
+	}
+	if key != "" && schema.VariableFile != "" {
+		fd.EnvFile = schema.VariableFile
+	}
+	return fd
 }
 
 // flagReconKey is a flag's (or an argument's) reconciliation key, which opts it into the fallback chain
@@ -89,6 +99,7 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
 			EnvVar:     envVarName(e, envPrefix),
 			Constraint: joinTags(constraintTags(e.Schema), expansionTags(e.Schema), pathTag(e.Schema)),
+			Doc:        fieldDoc(e.Summary, e.Deprecated),
 		}
 		// recon splits an env list or map on its separator option (default ","), plainly.
 		if e.Schema != nil && e.Schema.Separator != "" && e.Schema.Separator != "," {
@@ -158,14 +169,20 @@ func constraintTags(schema *InputSchema) string {
 }
 
 // tagEscaper escapes the list syntax's special bytes in an item, key or value.
-var tagEscaper = strings.NewReplacer(`\`, `\\`, ",", `\,`, "=", `\=`)
+func tagEscaper() *strings.Replacer {
+	return tagEscaperOnce.value(func() *strings.Replacer {
+		return strings.NewReplacer(`\`, `\\`, ",", `\,`, "=", `\=`)
+	})
+}
+
+var tagEscaperOnce lazy[*strings.Replacer]
 
 // tagList writes items as a list tag value: each item escaped, joined with ",". The input
 // reader splits it back on the unescaped commas.
 func tagList(items []string) string {
 	escaped := make([]string, len(items))
 	for i, it := range items {
-		escaped[i] = tagEscaper.Replace(it)
+		escaped[i] = tagEscaper().Replace(it)
 	}
 	return strings.Join(escaped, ",")
 }
@@ -175,7 +192,7 @@ func tagList(items []string) string {
 func tagPairs(m map[string]string) string {
 	pairs := make([]string, 0, len(m))
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		pairs = append(pairs, tagEscaper.Replace(k)+"="+tagEscaper.Replace(m[k]))
+		pairs = append(pairs, tagEscaper().Replace(k)+"="+tagEscaper().Replace(m[k]))
 	}
 	return strings.Join(pairs, ",")
 }
@@ -260,6 +277,7 @@ func configFields(in *Inputs) []fieldDef {
 			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
 			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
 			Constraint: joinTags(constraintTags(c.Schema), expansionTags(c.Schema), pathTag(c.Schema)),
+			Doc:        fieldDoc(c.Summary, c.Deprecated),
 		}
 		if c.Schema != nil && c.Schema.File != "" {
 			fd.CfgFile = c.Schema.File
@@ -379,15 +397,7 @@ func argFields(in *Inputs, envPrefix string) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		key := flagReconKey(a.Name, a.Schema)
-		fields = append(fields, fieldDef{
-			Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema),
-			Recon: key, EnvVar: flagEnvVar(a.Schema, key, envPrefix), Comment: contractComment(a.Schema),
-			Constraint: expansionTags(a.Schema),
-		})
-		if key != "" && a.Schema.VariableFile != "" {
-			fields[len(fields)-1].EnvFile = a.Schema.VariableFile
-		}
+		fields = append(fields, argvField(a.Name, a.Summary, a.Deprecated, a.Schema, envPrefix))
 	}
 	return fields
 }
@@ -441,31 +451,37 @@ func jsonSchemaTypeToGo(t string) string {
 	case "inputfile", "outputfile":
 		return "string" // a path, or "-" for stdin or stdout; checked like existingfile
 	}
-	if g, ok := valueTypeGo[t]; ok {
+	if g, ok := valueTypeGo()[t]; ok {
 		return g
 	}
 	return t
 }
 
 // valueTypeGo is the Go type each of rotini's value types reads into.
-var valueTypeGo = map[string]string{
-	"duration":    "time.Duration",
-	"time":        "time.Time",
-	"datetime":    "time.Time",
-	"date":        "time.Time",
-	"url":         "*url.URL",
-	"email":       "mail.Address",
-	"timezone":    "*time.Location",
-	"mac":         "net.HardwareAddr",
-	"ip":          "netip.Addr",
-	"cidr":        "netip.Prefix",
-	"hostport":    "netip.AddrPort",
-	"bytesize":    "rotini.ByteSize",
-	"hexbytes":    "rotini.HexBytes",
-	"base64bytes": "rotini.Base64Bytes",
-	"regexp":      "*regexp.Regexp",
-	"glob":        "rotini.Glob",
+func valueTypeGo() map[string]string {
+	return valueTypeGoOnce.value(func() map[string]string {
+		return map[string]string{
+			"duration":    "time.Duration",
+			"time":        "time.Time",
+			"datetime":    "time.Time",
+			"date":        "time.Time",
+			"url":         "*url.URL",
+			"email":       "mail.Address",
+			"timezone":    "*time.Location",
+			"mac":         "net.HardwareAddr",
+			"ip":          "netip.Addr",
+			"cidr":        "netip.Prefix",
+			"hostport":    "netip.AddrPort",
+			"bytesize":    "rotini.ByteSize",
+			"hexbytes":    "rotini.HexBytes",
+			"base64bytes": "rotini.Base64Bytes",
+			"regexp":      "*regexp.Regexp",
+			"glob":        "rotini.Glob",
+		}
+	})
 }
+
+var valueTypeGoOnce lazy[map[string]string]
 
 // splitMapType splits a `map[K]V` spelling into its key and value, matching brackets so a key or
 // value that itself contains brackets is kept whole.
@@ -506,7 +522,7 @@ var rotiniTypeAliases = []string{
 func toTemplateFields(fs []fieldDef) []templateInputField {
 	out := make([]templateInputField, 0, len(fs))
 	for _, f := range fs {
-		tf := templateInputField{Field: f.Field, GoType: f.GoType, Comment: f.Comment}
+		tf := templateInputField{Field: f.Field, GoType: f.GoType, Comment: f.Comment, Doc: f.Doc}
 		if f.Tag != "" {
 			tf.Tag = inputFieldTag(f)
 		}
@@ -543,6 +559,41 @@ func collectPathFrom(gp *program) map[string]pathFromClaim {
 	add(gp.rootInputs)
 	eachOwnNode(gp.tree, func(n *rnode) { add(n.inputs) })
 	return out
+}
+
+// fieldDoc is an input field's doc comment lines: the input's summary, then a "Deprecated:"
+// paragraph with the deprecation message, so an editor shows both and flags a use. nil when the
+// input has neither.
+func fieldDoc(summary, deprecated string) []string {
+	summary, deprecated = commentText(summary), commentText(deprecated)
+	var lines []string
+	for l := range strings.Lines(strings.TrimSpace(summary)) {
+		lines = append(lines, strings.TrimRight("// "+strings.TrimRight(l, "\r\n"), " "))
+	}
+	if deprecated = strings.TrimSpace(deprecated); deprecated != "" {
+		if len(lines) > 0 {
+			lines = append(lines, "//")
+		}
+		for i, l := range slices.Collect(strings.Lines(deprecated)) {
+			l = strings.TrimRight(l, "\r\n")
+			if i == 0 {
+				l = "Deprecated: " + l
+			}
+			lines = append(lines, strings.TrimRight("// "+l, " "))
+		}
+	}
+	return lines
+}
+
+// commentText is s as a Go comment can hold it: a carriage return, NUL or other control
+// character (but a newline or tab), a byte order mark and invalid UTF-8 become spaces.
+func commentText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\ufeff' || r == utf8.RuneError || (unicode.IsControl(r) && r != '\n' && r != '\t') {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(s, " "))
 }
 
 // contractComment is the TextUnmarshaler note emitted on flag and argument fields whose type

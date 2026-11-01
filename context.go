@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 // One is built per [Program.Run] and passed to every hook of that run, so hooks share its
 // dependencies, records and exit state, and nothing carries over between runs.
 //
-// The surface groups into eight jobs:
+// The surface groups into nine jobs:
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
 //     fields, and the run's environment and working directory: [Context.LookupEnv],
@@ -24,42 +25,50 @@ import (
 //     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
-//     [Context.CommandChain] lists every command from the root to the invoked one, and
-//     [Context.Usage] is its usage line
+//     [Context.CommandChain] lists every command from the root to the invoked one,
+//     [Context.Usage] is its usage line, and [Context.UnknownCommand] is a mistyped
+//     sub-command a short-circuit flag let pass
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
-//     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
-//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each;
+//     [Context.ArgvInputs], [Context.EnvInputs], [Context.ConfigInputs],
+//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each
+//     ([Context.FileInputs] is the deprecated name of ConfigInputs);
 //     [Context.CheckInputs] checks inputs the program collected itself against the spec
 //   - output — [Context.WriteOutput] writes the command's declared output to stdout,
 //     [Context.WriteOutputItem] one item of a stream, [Context.WriteOutputTo] and
 //     [Context.WriteOutputItemTo] write them to another writer, and [Context.CheckOutput] checks
 //     a value against the declared shape without writing it
-//   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
+//   - dependencies — [Context.Dependency], [Context.LookupDependency] and
+//     [Context.MustDependency] read one, building a provided one on first request;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
-//     [Context.RecordError], and [Context.Failed]; during completion, a completer adds to
-//     its answer with [Context.AddCompletionMessage], [Context.SetCompletionOptions] and
-//     [Context.SetCompletionFallback], and reads what has been typed so far with
-//     [Context.PartialInputs]
+//     [Context.RecordError] and [Context.Record] (into an author [Channel]), and
+//     [Context.Failed]
+//   - completion — a completer reads what has been typed so far with [Context.PartialInputs],
+//     and adds to its answer with [Context.AddCompletionMessage],
+//     [Context.SetCompletionOptions] and [Context.SetCompletionFallback]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help], [Context.InvokedHelp],
 //     [Context.HelpFor], [Context.CompletionScript] and [Context.Parser] read them, and
 //     [Context.PluginHelp] runs a plugin's help;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithCompletionScript], [Context.WithParser],
-//     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
-//     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
+//     [Context.WithInputSettings], [Context.WithInputReader] (deprecated), [Context.WithEnviron],
+//     [Context.WithDir], [Context.WithFS], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
 //     [Context.WithOutputChecks] set them on a standalone Context
 //
-// Nothing is parsed or validated until a handler calls an inputs method; a handler with its
-// own parser reads [Context.Argv] instead.
+// Nothing is parsed or validated until a handler calls an inputs method. A program with its own
+// command-line syntax sets an [ArgvParser] with [Program.WithParser] and keeps every other input
+// source; a handler that wants none of it reads [Context.Argv] instead.
 //
 // A Context is safe for concurrent use by the goroutines a hook starts. [Context.Command]
 // reflects the step running when it is called (see its doc). A Context must not be copied.
 //
 // Methods do not check for a nil receiver, with these exceptions: the With setters do nothing
-// and return nil, the inputs methods return an error, and [Deprecations] returns none.
+// and return nil, the inputs methods return an error, [Context.Usage] and [Context.DashIndex]
+// return their zero values, and [Context.Now], [Context.LookupEnv], [Context.Environ] and
+// [Context.Dir] read the process's clock, environment and working directory. The functions
+// [Deprecations] and [EffectsOf] return their zero values for a nil Context.
 //
 // A nil argument to a With setter restores that setting's default.
 type Context struct {
@@ -70,8 +79,8 @@ type Context struct {
 	// dispatch and never nil.
 	//
 	// Set them with [Context.WithStdin] and its siblings on a standalone Context, and with
-	// [Program.WithStdin] and its siblings for a run. The default reporter writes to the
-	// Program's streams.
+	// [Program.WithStdin] and its siblings for a run. Rotini's reporters write to Stderr as it
+	// stands when the run ends.
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -81,6 +90,16 @@ type Context struct {
 	// changes what later parses see. A command's declared positionals are the Arguments field
 	// of its generated inputs.
 	Argv []string
+
+	// providers are the program's dependency providers (nil on a standalone Context);
+	// provided holds their results in this run, by name, and cleanups the cleanups they
+	// returned, in construction order.
+	providers *dependencyStore
+	provided  map[string]*providedValue
+	cleanups  []providedCleanup
+	// closesShared reports that the run is [Program.Execute]'s, which releases the program's
+	// shared values as it settles.
+	closesShared bool
 
 	services      map[string]any
 	chain         []Command // resolved command path, root → leaf
@@ -93,6 +112,9 @@ type Context struct {
 	warnings      []error   // runtime, never recorded by a handler.
 	successes     []string
 	faults        []*PanicError
+	channels      []*channelRecords // author channels, in first-recorded order
+	declared      []ChannelDef      // the channels the Definition declares (read-only)
+	lastErr       error             // the error RecordError last recorded in the current hook, as given
 
 	// frame is the chain index of the command whose hook is running, or frameUnset outside a
 	// hook (resolving to the leaf). [AsCommand] sets it around every step; [Context.Command]
@@ -100,9 +122,14 @@ type Context struct {
 	frame int
 
 	// ctx is the context the running hook received; see [Context.SetContext]. ctxFrozen makes
-	// SetContext a no-op during teardown and the reporter.
+	// SetContext a no-op during teardown and the reporter. ctxGen counts the contexts
+	// SetContext has handed on.
 	ctx       context.Context
 	ctxFrozen bool
+	ctxGen    uint32
+
+	// middleware wraps every hook; see [Program.WithMiddleware].
+	middleware []Middleware
 
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
@@ -110,10 +137,10 @@ type Context struct {
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
-	// pluginHelp runs a plugin with --help for [Context.PluginHelp]; nil outside a run.
-	pluginHelp func(rtx *Context, words []string) bool
-	scripts    CompletionScriptFunc
-	parser     *Parser
+	// program is the running program, read only by [Context.PluginHelp]; nil outside a run.
+	program *Program
+	scripts CompletionScriptFunc
+	parser  ArgvParser
 
 	// view is the environment and directory this run reads; see [Program.WithEnviron] and
 	// [Program.WithDir]. nil reads the process's.
@@ -136,7 +163,7 @@ type Context struct {
 	// only while a completion request runs.
 	completionOptions *CompletionOptions
 	// completionFallback is what [Context.SetCompletionFallback] chose, or nil.
-	completionFallback *Completion
+	completionFallback *CompletionHint
 
 	// stdinRead is the run's stdin, read at most once and shared by every consumer: argv can
 	// be parsed several times in one run and inputs collected more than once, but stdin can be
@@ -176,7 +203,7 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
-	return argvAcq{rtx: rtx, dir: rtx.osView().base(), clock: &rtx.clock}
+	return argvAcq{rtx: rtx, view: rtx.osView(), clock: &rtx.clock}
 }
 
 // newContext returns an empty [Context] with the os streams and no resolved command.
@@ -191,13 +218,12 @@ func newContext() *Context {
 
 // NewContextFor builds a [Context] with argv resolved against def, as the runtime does before
 // dispatch, using the os streams until [Context.WithStdout] and its siblings replace them, and no
-// program settings. It has every [Feature]. It serves tests of the [Parser], the [Context.Inputs]
-// family, or a single hook:
+// program settings. It has every [Feature]. It serves tests of an [ArgvParser], the
+// [Context.Inputs] family, or a single hook:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
-//	var in appInputs
-//	err := rtx.Parser().Parse(rtx, &in)
+//	in, err := rtx.Inputs[AppBuildInputs]()
 //
 // A single hook runs against captured streams:
 //
@@ -207,16 +233,17 @@ func newContext() *Context {
 //		WithStdout(&out)
 //	(&listHandler{}).Run(t.Context(), rtx)
 //
-// To test a generated program end to end, build it with the generated NewProgram and run it
-// with [Program.WithExit] and captured streams.
+// To test a generated program end to end, run the generated NewProgram with Run or RunArgv
+// from package rotinitest, which isolate its environment and capture what it wrote.
 //
 // A plugin token resolves to the chain that precedes it; no plugin is executed.
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
-	markInvoked(chain)
+	finishChain(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
+	rtx.declared = def.Channels
 	rtx.clock.feats = legacyFeatures(def)
 	rtx.view = rtx.view.withClock(&rtx.clock)
 	return rtx
@@ -270,12 +297,34 @@ func (rtx *Context) withPath(err error) error {
 	return err
 }
 
-// markInvoked sets Invoked on the last command of chain and clears it on the others, whoever
-// built the chain.
-func markInvoked(chain []Command) {
+// finishChain sets Invoked on the last command of chain and clears it on the others, and
+// carries each command's ancestors' stability down to it, whoever built the chain. Applying it
+// again changes nothing.
+func finishChain(chain []Command) {
 	for i := range chain {
 		chain[i].Invoked = i == len(chain)-1
+		if i > 0 {
+			chain[i].Stability = leastStable(chain[i-1].Stability, chain[i].Stability)
+		}
 	}
+}
+
+// leastStable returns the less stable of two stability markers: "experimental", then "beta",
+// then "" (stable). A marker rotini doesn't know counts as experimental.
+func leastStable(a, b string) string {
+	rank := func(s string) int {
+		switch s {
+		case "":
+			return 2
+		case "beta":
+			return 1
+		}
+		return 0
+	}
+	if rank(b) < rank(a) {
+		return b
+	}
+	return a
 }
 
 // frameUnset marks a Context that is not inside a lifecycle step. It resolves to the invoked
@@ -412,9 +461,9 @@ func (rtx *Context) Halt() {
 //	    return
 //	}
 //
-// It is the standard way for any hook to fail. Where Halt has no effect (Run and the teardown
-// hooks), HaltWith only records. A nil err records nothing and still halts. To record and
-// continue, use RecordError alone.
+// It is how a [Handler] hook, or a helper it calls, fails; an [HandlerE] hook returns its
+// error instead. Where Halt has no effect (Run and the teardown hooks), HaltWith only records.
+// A nil err records nothing and still halts. To record and continue, use RecordError alone.
 //
 // Inside the reporter it has no effect: the halt is a no-op and the record is dropped.
 func (rtx *Context) HaltWith(err error) {
@@ -532,10 +581,47 @@ func (rtx *Context) RecordError(err error) {
 	if err == nil {
 		return
 	}
+	given := err
 	err = rtx.withPath(err)
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
 	rtx.errs = append(rtx.errs, err)
+	rtx.lastErr = given
+}
+
+// hookStarts forgets the error an earlier hook recorded, so [Context.returned] skips only one
+// the starting hook records itself.
+func (rtx *Context) hookStarts() {
+	rtx.mu.Lock()
+	rtx.lastErr = nil
+	rtx.mu.Unlock()
+}
+
+// returned applies an [HandlerE] hook's result: it records err unless it is the error the
+// hook last recorded itself, and when halt is set it stops forward progress as HaltWith does.
+func (rtx *Context) returned(err error, halt bool) {
+	if err == nil {
+		return
+	}
+	rtx.mu.RLock()
+	last := rtx.lastErr
+	rtx.mu.RUnlock()
+	if !sameError(err, last) {
+		rtx.RecordError(err)
+	}
+	if halt {
+		rtx.Halt()
+	}
+}
+
+// sameError reports whether a and b are the same error value, without the panic == raises for
+// an uncomparable dynamic type.
+func sameError(a, b error) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta.Comparable() && a == b //nolint:errorlint // identity, not a match: the same value the hook recorded
 }
 
 // copyErrors snapshots the recorded errors, in recording order.
@@ -596,15 +682,15 @@ func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 	return nil
 }
 
-// Failed reports whether this run has so far recorded an error or captured a fault. A
-// teardown hook uses it to decide between committing and rolling back:
+// Failed reports whether this run has so far recorded an error, captured a fault, or recorded
+// into a [ChannelClassError] channel. A teardown hook uses it to decide between committing and
+// rolling back:
 //
-//	func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+//	func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
 //	    if rtx.Failed() {
-//	        tx.Rollback()
-//	        return
+//	        return tx.Rollback()
 //	    }
-//	    tx.Commit()
+//	    return tx.Commit()
 //	}
 //
 // The errors themselves reach only the reporter, through [Outcome]. Once true, Failed stays
@@ -612,7 +698,7 @@ func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 func (rtx *Context) Failed() bool {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	return len(rtx.errs) > 0 || len(rtx.faults) > 0
+	return len(rtx.errs) > 0 || len(rtx.faults) > 0 || failedChannel(rtx.channels)
 }
 
 // recordFault appends a recovered panic or detected fault.
@@ -630,10 +716,10 @@ func (rtx *Context) recordFault(pe *PanicError) {
 // WithInputSettings supplies the generated descriptor [Context.Inputs] reads from. See
 // [Program.WithInputSettings]. It is for a Context built with [NewContextFor]; during a run,
 // the change lasts for the rest of that run.
-func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
+func (rtx *Context) WithInputSettings(settings InputSettings) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
-		rtx.meta = bindSettings(meta)
+		rtx.meta = bindSettings(settings)
 		rtx.mu.Unlock()
 	}
 	return rtx
@@ -642,6 +728,8 @@ func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
 // WithInputReader replaces the input reader [Context.Inputs] uses. See
 // [Program.WithInputReader]. It is for a Context built with [NewContextFor]; during a run, the
 // change lasts for the rest of that run. A nil fn restores the default, [NewInputReader].
+//
+// Deprecated: use WithInputSettings with a modified copy of the generated InputSettings.
 func (rtx *Context) WithInputReader(fn func(InputSettings) *InputReader) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
@@ -686,13 +774,13 @@ func (rtx *Context) WithCompletionScript(fn CompletionScriptFunc) *Context {
 	return rtx
 }
 
-// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so every parser
-// behaves alike; see [Program.WithParser]. It is for a Context built with [NewContextFor];
-// during a run, the change lasts for the rest of that run. A nil parser restores the default.
-func (rtx *Context) WithParser(parser *Parser) *Context {
+// WithParser sets the [ArgvParser] that reads the command line for [Context.Inputs] and its
+// siblings. See [Program.WithParser]. It is for a Context built with [NewContextFor]; during a
+// run, the change lasts for the rest of that run. A nil parser restores rotini's own.
+func (rtx *Context) WithParser(parser ArgvParser) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
-		rtx.parser = parser
+		rtx.parser = settledParser(parser)
 		rtx.mu.Unlock()
 	}
 	return rtx
@@ -729,9 +817,9 @@ func (rtx *Context) WithStdout(w io.Writer) *Context {
 }
 
 // WithStderr sets [Context.Stderr] for a Context built with [NewContextFor]. A nil writer
-// restores os.Stderr. During a run it changes only this run's later handler writes and what a
-// custom reporter writes to; the default reporter keeps the Program's stream. Redirect a whole
-// run with [Program.WithStderr]. Configure it before use.
+// restores os.Stderr. During a run it changes this run's later writes, the reporter's
+// included, since rotini's reporters write to [Context.Stderr]. Redirect a whole run with
+// [Program.WithStderr]. Configure it before use.
 func (rtx *Context) WithStderr(w io.Writer) *Context {
 	if rtx != nil {
 		if w == nil {
@@ -797,11 +885,41 @@ func (rtx *Context) InvokedHelp() (string, error) {
 	return help(helpPath(chain, 1, len(chain))...)
 }
 
+// UnknownCommand returns the unknown-command error a short-circuit flag
+// ([FlagDef.ShortCircuit]) let pass, or nil. In `mycli nope --help` the command line resolves
+// to the root, which takes no arguments, and "nope" is read as a mistyped sub-command; the
+// flag waives that check, so [Context.ArgvInputs] and [Context.InvokedHelp] answer for the
+// root. UnknownCommand returns the [*ParseError] (Kind [ParseKindUnknownCommand], with Token
+// and Candidates) that `mycli nope` reports, so a hook answering the flag can report the word
+// instead:
+//
+//	if err := rtx.UnknownCommand(); err != nil {
+//		return err
+//	}
+//
+// It is nil when every word resolved, when no short-circuit flag is set (the run then reports
+// the word itself), and when the command line can't be parsed, which [Context.ArgvInputs]
+// reports.
+func (rtx *Context) UnknownCommand() error {
+	chain := rtx.chainRef()
+	if len(chain) == 0 {
+		return nil
+	}
+	store, err := rtx.argvTokens(chain)
+	if err != nil || !shortCircuited(chain, store) {
+		return nil //nolint:nilerr // a command line that can't be parsed is ArgvInputs's to report
+	}
+	leaf := len(chain) - 1
+	return rtx.withPath(strayCommand(&chain[leaf], &store.scopes[leaf], store))
+}
+
 // HelpFor returns the help page of the command at path, read the way a help command's arguments
 // are: from the command [Context.Command] sits under. In `acme db help migrate`, run in the hook
 // of db's help command, HelpFor("migrate") is the page of `acme db migrate`, and HelpFor() is
-// db's. The page is the running program's, as with [Context.Help]. It returns an error when
-// path names no command, and "" and no error when [Program.WithHelp] set no pages.
+// db's. The page is the running program's, as with [Context.Help]. When path names no command,
+// the generated Help function returns [UnknownCommandError], the error `acme db migrat` gives:
+// `acme db: unknown command "migrat"`. It returns "" and no error when [Program.WithHelp] set
+// no pages.
 func (rtx *Context) HelpFor(path ...string) (string, error) {
 	rtx.mu.RLock()
 	help := rtx.help
@@ -848,9 +966,10 @@ func (rtx *Context) Version() string {
 	return rtx.version
 }
 
-// Parser returns the [Parser] set by [Program.WithParser], or a new default parser. It never
-// returns nil.
-func (rtx *Context) Parser() *Parser {
+// Parser returns the [ArgvParser] that reads the command line: the one set by
+// [Program.WithParser], or rotini's own [*Parser]. It never returns nil. To bind the command
+// line alone with rotini's grammar, call [Parser.Parse] on [NewParser].
+func (rtx *Context) Parser() ArgvParser {
 	rtx.mu.RLock()
 	p := rtx.parser
 	rtx.mu.RUnlock()

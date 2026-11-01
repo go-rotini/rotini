@@ -16,14 +16,14 @@ taskr add [flags] <title>
 
 ## Flags
 
-- `-t, --tag` `[]string` — tags for the task; repeatable; each value at most once
-- `--priority` `string` — how urgent it is (default `low`) (one of `low`, `high`) (experimental)
+- `-t, --tag` `string...` — tags for the task; repeatable; each value at most once
+- `--priority` `string` — how urgent it is (default `low`, experimental) (one of `low`, `high`)
 - `--due` `date` — when it is due
 
 ## Global Flags
 
 - `-v, --verbose` — say more; repeat to count: -vvv
-- `-C, --dir` `string` — run as if started in this directory
+- `-C, --dir` `dir` — run as if started in this directory
 - `-h, --help` — show help
 
 ## Examples
@@ -43,3 +43,7 @@ Writes `Task` to stdout.
 ## Exit Status
 
 - `3` (`duplicate`) — a task with this title exists
+
+## See Also
+
+- [taskr](taskr.md)

@@ -24,8 +24,12 @@ For a spec with a `todo` root command and an `add` sub-command, the file holds:
 | the command tree | a `rotini.Definition` the runtime parses against |
 | every command | a method on the `ProgramHandlers` interface, which returns the command's handler (`todoAddHandler`) |
 | configuration files and the env prefix | `InputSettings`, which tells the runtime where values come from |
-| the conf's `generate.features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
+| the conf's `generate.features:` | `Help(path...)`, and `CompletionScript(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
 | every command's usage line | `Usage(path...)`, generated whether or not the help feature is on |
+| each enum value of a string input | a constant: `TodoAddPriorityHigh = "high"`, its `summary` as the doc comment |
+| each value of a string schema under `schemas:` | a constant of the schema's type: `StatusOpen Status = "open"` |
+| the root's `summary` | the package's doc comment, unless a file of yours in the package has one |
+| each configuration file, config key, profile and environment variable | a constant: `TodoConfigFileUser = "user"`, `TodoConfigKeyServerPort = "server.port"`, `TodoProfileProd = "prod"`, `TodoEnvToken = "TODO_TOKEN"` |
 
 It ends with what `main.go` and your tests use: `NewProgram()`, which builds the program with the
 generated handlers, and `NewProgramWith(handlers)`, which builds it with a set you pass, to swap
@@ -37,8 +41,10 @@ embed. `main.go` builds its program with `NewProgram()`; nothing is built at pac
 package todo
 
 type TodoAddFlags struct {
-	Priority string   `rotini:"priority"`
-	Tag      []string `rotini:"tag"`
+	// how urgent it is
+	Priority string `rotini:"priority"`
+	// a label to file it under
+	Tag []string `rotini:"tag"`
 }
 
 type TodoAddArguments struct {
@@ -60,7 +66,7 @@ func NewProgram() *rotini.Program {
 }
 
 func NewProgramWith(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {
+	return rotini.NewWiredProgram(rotiniDefinition(), func(name string) (rotini.Handler, bool) {
 		switch name {
 		case "Todo":
 			return handlers.Todo(), true
@@ -108,6 +114,17 @@ binary is smaller and starts faster. `go generate` keeps the list in step with t
 values, aliases and time layouts in their struct tags as comma-separated lists, with `\`
 escaping a `,`, `=` or `\` inside a value.
 
+Each input field carries its input's `summary` as a doc comment, and a `Deprecated:` paragraph
+when the input is deprecated, so an editor shows both and flags a use. The constants let a
+handler name a value once: `in.TodoAdd.Flags.Priority == TodoAddPriorityHigh`, or
+`rotini.SetConfigValue(rtx, TodoConfigFileUser, TodoConfigKeyServerPort, raw)`. A value renamed
+in the spec then stops compiling instead of silently never matching. A constant is named after
+its command (or flag set, or schema), the input and the value. When two spellings make one name
+(`dry-run` and `dry_run`), or the name is taken, `rotini validate` warns and that constant is
+left out; one that a file of yours already declares is left to you. `go generate` also warns
+about a file, key or profile name written into a `rotini.SetConfigValue`, `UnsetConfigValue`,
+`ConfigFilePath`, `ConfigProfiles` or `ConfigToProfile` call that the spec doesn't declare.
+
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's
 [`packages`](/configuration#packages).
@@ -118,8 +135,8 @@ another package can import them, declare a `models` target under the conf's
   its command appears in the spec and is never overwritten. When you remove a command from the
   spec, the next `go generate` disables its handler file by adding `//go:build ignore` at the
   top, so it is out of the build but your code is still there, and the one after deletes it,
-  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.Handler`
-  line, or list it under the conf's [`keep`](/configuration#keep).
+  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.HandlerE`
+  (or `rotini.Handler`) line, or list it under the conf's [`keep`](/configuration#keep).
 - **`main.go`**, created once and never touched again.
 - **Any other file you add to the package**, such as a test or a file declaring a dependency.
   Rotini only removes files it wrote.

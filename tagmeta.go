@@ -91,7 +91,7 @@ func checkChannelEnum(channel, label string, enum enumSet, vals []string, secret
 	for _, v := range vals {
 		if !enum.has(v) {
 			listed := enum.listed()
-			e := usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
+			e := usageBind(InputErrorKindEnumViolation, channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
 				redactValue(v, secret), label, strings.Join(listed, ", ")), nil)
 			e.Token, e.Candidates = redactValue(v, secret), listed
 			return e

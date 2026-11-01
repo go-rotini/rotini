@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 )
 
 // Category classifies an error by whose fault it is, so a reporter can choose the exit code and
@@ -136,11 +137,12 @@ func (c *categorized) Unwrap() []error { return []error{c.err, c.sentinel} }
 // [Program.WithContext].
 func ExitCause(code int) error { return exitCodeError{code: code} }
 
-// exitCodeError carries a process exit code as a context-cancellation cause. signal marks the
-// cause rotini's own signal trap sets, as opposed to an [ExitCause] from the caller.
+// exitCodeError carries a process exit code as a context-cancellation cause. signal is the
+// trapped signal when rotini's own signal trap set the cause, nil for an [ExitCause] from the
+// caller.
 type exitCodeError struct {
 	code   int
-	signal bool
+	signal os.Signal
 }
 
 func (e exitCodeError) Error() string {
@@ -165,18 +167,34 @@ func canceledExitCode(ctx context.Context) int {
 
 // signalCanceled reports whether ctx was canceled by the run's own signal trap.
 func signalCanceled(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	ec, ok := asError[exitCodeError](context.Cause(ctx))
-	return ok && ec.signal
+	return runSignal(ctx) != nil
 }
 
-// fromRunSignal reports whether err is the run's own signal cancellation surfacing as an error:
-// the trap's cancellation cause, or context.Canceled, after the trap canceled ctx. The default
-// reporter leaves such an error out, since a signal is a graceful stop and the exit code
-// already says why the run ended.
-func fromRunSignal(ctx context.Context, err error) bool {
+// runSignal returns the signal rotini's trap caught when it canceled ctx, or nil.
+func runSignal(ctx context.Context) os.Signal {
+	if ctx == nil {
+		return nil
+	}
+	if ec, ok := asError[exitCodeError](context.Cause(ctx)); ok {
+		return ec.signal
+	}
+	return nil
+}
+
+// CausedBySignal reports whether err is the run's own signal stop surfacing as an error: after
+// rotini's signal trap canceled ctx, the trap's cancellation cause or [context.Canceled]. ctx is
+// the run's context, as a hook or [Reporter] receives it. [DefaultReporter] leaves such an error
+// out, since a signal is a graceful stop and the exit code, 128+n, already says why the run
+// ended; a custom reporter filters the same way with it:
+//
+//	for _, err := range out.Errors {
+//		if !rotini.CausedBySignal(ctx, err) {
+//			fmt.Fprintln(rtx.Stderr, "error:", err)
+//		}
+//	}
+//
+// It is false for a nil err and for any error when the run was not stopped by its trap.
+func CausedBySignal(ctx context.Context, err error) bool {
 	if err == nil || !signalCanceled(ctx) {
 		return false
 	}
@@ -205,15 +223,22 @@ func (e *PanicError) Unwrap() []error {
 	return []error{ErrInternal}
 }
 
-// WiringError reports that the generated [Definition] and the handler set are out of sync — a
-// resolved command names a handler method that does not exist, or whose return value does not
-// implement [Handler] — or that a command declares config inputs but the program has no
-// [InputSettings], or that a program built with [NewWiredProgram] needs a [Feature] it was not
-// given, or that [Context.CompletionScript] was called on a program with no completion scripts.
+// WiringError reports a program assembled wrong, the author's bug rather than the user's:
+//
+//   - the generated [Definition] and the handler set are out of sync: a resolved command names
+//     a handler method that does not exist, or whose return value is neither a [Handler] nor
+//     an [HandlerE];
+//   - a command declares config inputs but the program has no [InputSettings];
+//   - a program built with [NewWiredProgram] needs a [Feature] it was not given, including a
+//     document format with no codec wired, which a format rotini doesn't ship needs [Codec] for;
+//   - two [Channel]s of one name but a different type or class were recorded into in one run
+//     (recorded as a fault);
+//   - [Context.CompletionScript] was called on a program with no completion scripts.
+//
 // It is always [CategoryInternal].
 //
-// Handler is set only for a resolved command whose handler is missing or not a [Handler], and
-// Command names that command. Some missing-[Feature] errors also set Command, to the command
+// Handler is set only for a resolved command whose handler is missing or is neither kind of
+// handler, and Command names that command. Some missing-[Feature] errors also set Command, to the command
 // whose run needed the feature. Both are empty for the other wiring errors, including a nil
 // handlers value passed to [NewProgram] and a nil lookup passed to [NewProgramFunc].
 type WiringError struct {

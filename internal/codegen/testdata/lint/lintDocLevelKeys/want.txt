@@ -1,2 +1,9 @@
 spec: .rotini.spec.yaml:7:19: command demo/build: sets `env_prefix`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
 spec: .rotini.spec.yaml:9:21: command demo/ship: sets `display_name`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:12:9: command demo/get: sets `exit_statuses`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:15:9: command demo/put: sets `schemas`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:16:23: command demo/put: sets `response_files`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:18:9: command demo/put: sets `channels`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:23:9: command demo/show: declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them
+spec: .rotini.spec.yaml:27:18: command demo/show: sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:29:9: command demo/show: sets `topics`, which only the root command declares; move the topics to the root

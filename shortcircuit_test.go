@@ -1,9 +1,13 @@
 package rotini
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +59,15 @@ func TestShortCircuit_parseWaivesRequirements(t *testing.T) {
 		{"flag dependency waived", []string{"--help", "--level", "low"}, ParseKindUnspecified},
 		{"sub-command requirement waived", []string{"run", "--help"}, ParseKindUnspecified},
 		{"explicit false waives nothing", []string{"--help=false"}, ParseKindMissingRequired},
+		{"explicit 1 waives", []string{"--help=1"}, ParseKindUnspecified},
+		{"explicit t waives", []string{"--help=t"}, ParseKindUnspecified},
+		{"explicit yes waives", []string{"--help=yes"}, ParseKindUnspecified},
+		{"explicit y waives", []string{"--help=y"}, ParseKindUnspecified},
+		{"explicit on waives", []string{"--help=on"}, ParseKindUnspecified},
+		{"explicit TRUE waives", []string{"--help=TRUE"}, ParseKindUnspecified},
+		{"explicit 0 waives nothing", []string{"--help=0"}, ParseKindMissingRequired},
+		{"explicit no waives nothing", []string{"--help=no"}, ParseKindMissingRequired},
+		{"explicit off waives nothing", []string{"--help=off"}, ParseKindMissingRequired},
 		{"unknown flag kept", []string{"--help", "--bogus"}, ParseKindUnknownFlag},
 		{"unknown command kept", []string{"nope", "--help"}, ParseKindUnknownCommand},
 		{"uncoercible value kept", []string{"--help", "--port", "abc"}, ParseKindInvalidValue},
@@ -140,7 +153,7 @@ func scChannelDef() Definition {
 func TestShortCircuit_readerWaivesChannelRequirements(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  other: x\n")
 	reader := func() *InputReader {
-		return NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{
+		return NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{
 			Name: "app", Path: cfg, Format: "yaml",
 			Schema: `{"type":"object","required":["must"]}`,
 		}}})
@@ -185,7 +198,7 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 		rtx := NewContextFor(scChannelDef(), []string{"--help"})
 		rtx.Stdin = strings.NewReader("")
 		var in scChannelInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the unparseable config file skipped", err)
 		}
@@ -207,7 +220,7 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 				}
 			}
 		}
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the config value skipped", err)
 		}
@@ -217,8 +230,8 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 		rtx := NewContextFor(scChannelDef(), []string{"--help"})
 		rtx.Stdin = strings.NewReader("")
 		var in scChannelInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{
-			Name: "app", Path: "app.yaml", PathFrom: &PathFromDef{Env: "APP_CONFIG"},
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{
+			Name: "app", Path: "app.yaml", PathFrom: &PathFromDef{Env: []string{"APP_CONFIG"}},
 		}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the missing config file skipped", err)
@@ -258,7 +271,7 @@ func TestShortCircuit_brokenConfigFallbackFlag(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+		reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Path: path}}})
 		for _, argv := range [][]string{{"--help"}, {"sub", "--help"}} {
 			rtx := NewContextFor(brokenConfigDef(), argv)
 			rtx.frame = 0
@@ -279,7 +292,7 @@ func TestShortCircuit_brokenConfigWithoutWaiver(t *testing.T) {
 	if err := os.WriteFile(path, []byte("defaults: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Path: path}}})
 	rtx := NewContextFor(brokenConfigDef(), []string{"sub"})
 	rtx.frame = 0
 	var in brokenConfigInputs
@@ -308,7 +321,7 @@ func TestShortCircuit_brokenConfigKeepsOtherFiles(t *testing.T) {
 	if err := os.WriteFile(good, []byte("list:\n  limit: 9\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "broken", Path: broken},
 		{Name: "good", Path: good},
 	}})
@@ -396,4 +409,152 @@ func TestShortCircuit_completionReadsBundles(t *testing.T) {
 			t.Errorf("%q: candidates %q, stopped %v; want stopped %v", tt.words, got, stopped, tt.stop)
 		}
 	}
+}
+
+// scStrayDef is a root with short-circuit --help and --version, an author's own short-circuit
+// --explain, a group command, and a leaf that takes one argument.
+func scStrayDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", ShortCircuit: true},
+			{Name: "version", Identifiers: []string{"--version"}, Type: "bool", ShortCircuit: true},
+			{Name: "explain", Identifiers: []string{"--explain"}, Type: "bool", ShortCircuit: true},
+		},
+		Commands: []CommandDef{
+			{Name: "add", Handler: "AppAdd", Arguments: []ArgDef{{Name: "title", Type: "string", Required: true}}},
+			{Name: "config", Handler: "AppConfig", Commands: []CommandDef{
+				{Name: "set", Handler: "AppConfigSet", Arguments: []ArgDef{{Name: "key", Type: "string", Required: true}}},
+			}},
+		},
+	}
+}
+
+// TestContext_UnknownCommand pins the word a short-circuit flag let pass: the same
+// path-prefixed unknown-command error the run reports without the flag, for --help, --version
+// and an author's own flag, on the root and on a group; nil when everything resolved, when a
+// leaf merely has too many arguments, and without a short-circuit flag.
+func TestContext_UnknownCommand(t *testing.T) {
+	tests := []struct {
+		argv  []string
+		token string // "" = nil expected
+		msg   string
+		cands []string
+	}{
+		{[]string{"nope", "--help"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"--help", "nope"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "-h"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "--version"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "--explain"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"config", "sett", "--help"}, "sett", `app config: unknown command "sett"`, []string{"set"}},
+		{argv: []string{"--help"}},
+		{argv: []string{"config", "--help"}},
+		{argv: []string{"add", "a", "b", "--help"}},
+		{argv: []string{"nope"}},
+		{argv: []string{"nope", "--help=false"}},
+		{argv: []string{"config", "sett"}},
+	}
+	for _, tt := range tests {
+		err := NewContextFor(scStrayDef(), tt.argv).UnknownCommand()
+		if tt.token == "" {
+			if err != nil {
+				t.Errorf("%q: UnknownCommand() = %v, want nil", tt.argv, err)
+			}
+			continue
+		}
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindUnknownCommand || pe.Token != tt.token || pe.Error() != tt.msg || !slices.Equal(pe.Candidates, tt.cands) {
+			t.Errorf("%q: UnknownCommand() = %#v, want an unknown-command *ParseError %q for %q with candidates %q", tt.argv, err, tt.msg, tt.token, tt.cands)
+		}
+	}
+}
+
+type scStrayInputs struct {
+	App struct {
+		Flags struct {
+			Help    bool `rotini:"help"`
+			Version bool `rotini:"version"`
+		}
+		Arguments struct{}
+	}
+}
+
+type scStrayHandlers struct{ optOut bool }
+
+func (h scStrayHandlers) App() Handler        { return FromHandlerE(&scStrayRoot{optOut: h.optOut}) }
+func (scStrayHandlers) AppAdd() Handler       { return ocNoop{} }
+func (scStrayHandlers) AppConfig() Handler    { return ocNoop{} }
+func (scStrayHandlers) AppConfigSet() Handler { return ocNoop{} }
+
+// scStrayRoot answers --help and --version the way the seeded root hook does; optOut is the
+// same hook with the UnknownCommand check deleted.
+type scStrayRoot struct {
+	NoPreRunE
+	NoPostRunE
+	NoCascadingPostRunE
+	optOut bool
+}
+
+func (h *scStrayRoot) CascadingPreRun(_ context.Context, rtx *Context) error {
+	argv, err := rtx.ArgvInputs[scStrayInputs]()
+	if err != nil {
+		return err
+	}
+	if !h.optOut {
+		if err := rtx.UnknownCommand(); err != nil {
+			return err
+		}
+	}
+	switch {
+	case argv.Values.App.Flags.Help:
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	case argv.Values.App.Flags.Version:
+		_, _ = io.WriteString(rtx.Stdout, "app 1.0.0")
+		rtx.HaltWithCode(0)
+	}
+	return nil
+}
+
+func (*scStrayRoot) Run(context.Context, *Context) error { return nil }
+
+// TestShortCircuit_hookReportsUnknownCommand pins the seeded hook's shape: with the
+// UnknownCommand check, `app nope --help` fails with exit 1 and the unknown-command error;
+// without it, the hook answers for the root, as ArgvInputs and InvokedHelp report no error.
+func TestShortCircuit_hookReportsUnknownCommand(t *testing.T) {
+	run := func(optOut bool, argv ...string) (int, error, string) {
+		var out bytes.Buffer
+		p := NewProgram(scStrayDef(), scStrayHandlers{optOut: optOut}).
+			WithHelp(func(path ...string) (string, error) { return "page:" + strings.Join(path, " "), nil }).
+			WithStdout(&out).WithStderr(io.Discard).WithoutSignalHandling()
+		code, err := p.Run(argv)
+		return code, err, out.String()
+	}
+	for _, argv := range [][]string{{"nope", "--help"}, {"nope", "--version"}, {"config", "sett", "--help"}} {
+		code, err, out := run(false, argv...)
+		if code != 1 || !isUnknownCommand(err) || out != "" {
+			t.Errorf("%q: exit %d, %v, printed %q; want 1 and the unknown-command error", argv, code, err, out)
+		}
+	}
+	for argv, page := range map[string]string{"nope --help": "page:", "config sett --help": "page:config", "nope --version": "app 1.0.0"} {
+		code, err, out := run(true, strings.Fields(argv)...)
+		if code != 0 || err != nil || out != page {
+			t.Errorf("opted out, %q: exit %d, %v, printed %q; want 0 and %q", argv, code, err, out, page)
+		}
+	}
+	for argv, page := range map[string]string{"--help": "page:", "config --help": "page:config", "add a b --help": "page:add"} {
+		code, err, out := run(false, strings.Fields(argv)...)
+		if code != 0 || err != nil || out != page {
+			t.Errorf("%q: exit %d, %v, printed %q; want 0 and %q", argv, code, err, out, page)
+		}
+	}
+}
+
+func isUnknownCommand(err error) bool {
+	pe, ok := errors.AsType[*ParseError](err)
+	return ok && pe.Kind == ParseKindUnknownCommand
 }

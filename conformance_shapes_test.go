@@ -70,7 +70,7 @@ func shpContext(t *testing.T, config, dotenv string, env []string, argv ...strin
 			t.Fatal(err)
 		}
 	}
-	meta := InputSettings{ConfigFiles: []ConfigFile{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "app", Path: "app.yaml", Format: "yaml"},
 		{Name: "dotenv", Path: ".env", Format: "dotenv", As: "env"},
 	}}
@@ -159,7 +159,7 @@ func shapeConformanceCases() []dataCase {
 			}
 		}},
 		{"CFG-14", func(t *testing.T) { // a required input pinned to one file, missing there, names that file, found or not
-			files := []ConfigFile{{Name: "app", Path: "app.yaml"}, {Name: "user", Path: "user.yaml"}}
+			files := []ConfigFileDef{{Name: "app", Path: "app.yaml"}, {Name: "user", Path: "user.yaml"}}
 			dir := t.TempDir()
 			user := filepath.Join(dir, "user.yaml")
 			shpConfigError(t, dir, files, nil, CategoryUsage, "config key token is required in configuration file "+user)
@@ -170,7 +170,7 @@ func shapeConformanceCases() []dataCase {
 		}},
 		{"CFG-15", func(t *testing.T) { // a source name collision is an internal error naming the sources
 			dir := t.TempDir()
-			files := []ConfigFile{{Name: "user", Path: "app.yaml"}}
+			files := []ConfigFileDef{{Name: "user", Path: "app.yaml"}}
 			shpConfigError(t, dir, files, []recon.Source{recon.NewMapSource("user", nil)}, CategoryInternal,
 				`could not build the configuration registry: configuration file `+filepath.Join(dir, "app.yaml")+` and a custom source are both named "user"`)
 		}},
@@ -190,7 +190,7 @@ type shpPinnedInputs struct {
 // shpConfigError reads shpPinnedInputs in dir, where app.yaml holds a token, through every
 // reader, and checks that each reports a config *InputError of category cat whose message is
 // want.
-func shpConfigError(t *testing.T, dir string, files []ConfigFile, sources []recon.Source, cat Category, want string) {
+func shpConfigError(t *testing.T, dir string, files []ConfigFileDef, sources []recon.Source, cat Category, want string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte("token: t\n"), 0o600); err != nil {
 		t.Fatal(err)

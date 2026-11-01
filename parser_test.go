@@ -63,9 +63,9 @@ func TestParse_viaContextParser(t *testing.T) {
 	supplied := NewParser()
 	rtx.WithParser(supplied)
 
-	parser := rtx.Parser()
-	if parser != supplied {
-		t.Fatalf("Parser() = %p, want the supplied %p", parser, supplied)
+	parser, ok := rtx.Parser().(*Parser)
+	if !ok || parser != supplied {
+		t.Fatalf("Parser() = %v, want the supplied %p", rtx.Parser(), supplied)
 	}
 	var in runInputs
 	if err := parser.Parse(rtx, &in); err != nil {
@@ -2079,7 +2079,7 @@ func TestParse_negatedFormIsSuggestable(t *testing.T) {
 	if !slices.Contains(pe.Candidates, "--no-color") {
 		t.Errorf("candidates %v do not include the negated form", pe.Candidates)
 	}
-	if got := NewSuggestor().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
+	if got := NewSuggester().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
 		t.Errorf("suggestions %v do not offer --no-color for %q", got, pe.Token)
 	}
 }
@@ -2868,20 +2868,20 @@ func TestCoerce_narrowNumbersRejectOutOfRange(t *testing.T) {
 		want string // "" = binds; else a substring of the error
 	}{
 		{[]string{"--i8", "127", "--i8", "-128"}, ""},
-		{[]string{"--i8", "128"}, `"128" is not a valid int8 (out of range: -128 to 127)`},
+		{[]string{"--i8", "128"}, `"128" is not a valid integer (out of range: -128 to 127)`},
 		{[]string{"--i8", "-129"}, "out of range: -128 to 127"},
 		{[]string{"--i16", "32768"}, "out of range: -32768 to 32767"},
 		{[]string{"--i32", "2147483648"}, "out of range: -2147483648 to 2147483647"},
 		{[]string{"--u8", "255"}, ""},
-		{[]string{"--u8", "256"}, `"256" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u8", "256"}, `"256" is not a valid non-negative integer (out of range: 0 to 255)`},
 		{[]string{"--u8=-0"}, `"-0" is not a valid non-negative integer`},
 		{[]string{"--u8=-00"}, `"-00" is not a valid non-negative integer`},
 		{[]string{"--u16", "65536"}, "out of range: 0 to 65535"},
 		{[]string{"--u32", "4294967296"}, "out of range: 0 to 4294967295"},
 		{[]string{"--f32", "3.4e38"}, ""},
-		{[]string{"--f32", "1e300"}, `"1e300" is not a valid float32 (out of range`},
-		{[]string{"--list", "1", "--list", "300"}, `"300" is not a valid int8`},
-		{[]string{"--map", "a=1", "--map", "b=999"}, `"999" is not a valid int8`},
+		{[]string{"--f32", "1e300"}, `"1e300" is not a valid number (out of range`},
+		{[]string{"--list", "1", "--list", "300"}, `"300" is not a valid integer`},
+		{[]string{"--map", "a=1", "--map", "b=999"}, `"999" is not a valid integer`},
 	} {
 		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
 			_, err := NewContextFor(overflowDef(), tc.argv).Inputs[overflowInputs]()
@@ -2970,5 +2970,17 @@ func TestParse_cascadingIsHelpOnly(t *testing.T) {
 			t.Errorf("%q bound %+v / %+v, want region=eu, the parent's name=parent and the child's name=child",
 				argv, in.App.Flags, in.AppDeploy.Flags)
 		}
+	}
+}
+
+// A required_together failure names the group's flags that are missing.
+func TestCheckFlagGroup_requiredTogetherNamesMissing(t *testing.T) {
+	t.Parallel()
+	err := checkFlagGroup(FlagGroupRequiredTogether, []string{"--user"}, []string{"--user", "--pass", "--host"})
+	if want := "flags --user, --pass, --host must be used together; --pass and --host are missing"; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+	if pe, ok := asError[*ParseError](err); !ok || pe.Kind != ParseKindConstraintViolation {
+		t.Errorf("err = %#v, want a constraint-violation *ParseError", err)
 	}
 }

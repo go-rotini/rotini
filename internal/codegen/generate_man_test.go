@@ -214,7 +214,7 @@ func TestManPages_shape(t *testing.T) {
 		".SH \"EXIT STATUS\"\n.TP\n\\fB0\\fR\nsuccess",
 		".SH EXAMPLES\n.RS 4\n.nf\nacme deploy web \\-\\-replicas 3\n.sp\n# a two\\-line example\nacme status \\-\\-verbose\n.fi\n.RE",
 		".SH \"SEE ALSO\"\n\\fBacme\\-deploy\\fR(1), \\fBacme\\-status\\fR(1), git(1)",
-		"\\fB\\-\\-color[=string]\\fR\nwhen to color (default auto) [auto|always|never] (implicit: always)",
+		"\\fB\\-\\-color[=string]\\fR\nwhen to color (default auto, implicit: always) [auto|always|never]",
 	} {
 		if want == `.SH "GLOBAL OPTIONS"` {
 			if strings.Contains(root, want) {

@@ -1,11 +1,13 @@
-# R12 — the profiling recipe: hidden --cpuprofile and --trace flags start the profiler and the
-# tracer in the root's CascadingPreRun and stop them in its CascadingPostRun, which runs after
-# a failed command too. The root handler file is the one the guide shows.
+# R12 — the profiling recipe: a middleware starts the profiler and the tracer that hidden
+# --cpuprofile and --trace flags ask for before the root's CascadingPreRun, and stops them after
+# its CascadingPostRun, which runs after a failed command too. The root handler stays the seeded
+# one. The middleware and main.go are the ones the guide shows.
 
 gomodinit example.com/profdemo
 
 exec rotini generate cmd/profdemo/.rotini.spec.yaml --config cmd/profdemo/.rotini.conf.yaml
-cp root.go.txt internal/cmd/profdemo/profdemo.go
+cp profile.go.txt internal/cmd/profdemo/profile.go
+cp main.go.txt cmd/profdemo/main.go
 cp work.go.txt internal/cmd/profdemo/profdemo_work.go
 exec go mod tidy
 exec go build -o profdemo$exe ./cmd/profdemo
@@ -21,17 +23,28 @@ stdout 'Type: cpu'
 rm cpu.prof
 wantexit 1 ./profdemo$exe work --fail --cpuprofile cpu.prof
 exists cpu.prof
+exec go tool pprof -top profdemo$exe cpu.prof
+stdout 'Type: cpu'
+
+# Without the flags nothing is written.
+rm cpu.prof
+exec ./profdemo$exe work
+! exists cpu.prof
+
+# A file that can't be created fails the run before the command does any work.
+wantexit 1 ./profdemo$exe work --cpuprofile missing/cpu.prof
+stderr '^Error: open .*cpu\.prof: '
+! stdout worked
 
 # The flags are hidden from help.
 exec ./profdemo$exe --help
 ! stdout cpuprofile
 
--- root.go.txt --
+-- profile.go.txt --
 package profdemo
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
@@ -40,69 +53,94 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*profdemoHandler)(nil)
+// profiles holds the files a run's profiles are written to.
+type profiles struct{ cpu, trace *os.File }
 
-type profdemoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
+// running is this run's profiles, kept from the root's CascadingPreRun to its
+// CascadingPostRun.
+var running = rotini.NewDependency[*profiles]("profdemo.profiles")
 
-	// The files stay open from CascadingPreRun until CascadingPostRun closes them.
-	cpu, trace *os.File
+// Profile starts what --cpuprofile and --trace ask for before the root's CascadingPreRun, the
+// first hook of every run, and stops it after the root's CascadingPostRun, the last, which runs
+// even when the command failed or panicked.
+func Profile(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	// The root is the command no word on the command line named.
+	if h.Command.Matched != "" {
+		return next
+	}
+	switch h.Kind {
+	case rotini.HookCascadingPreRun:
+		return func(ctx context.Context, rtx *rotini.Context) error {
+			if err := start(rtx); err != nil {
+				return err
+			}
+			return next(ctx, rtx)
+		}
+	case rotini.HookCascadingPostRun:
+		return func(ctx context.Context, rtx *rotini.Context) error {
+			err := next(ctx, rtx)
+			if p, ok := rtx.LookupDependency(running); ok {
+				p.stop(rtx)
+			}
+			return err
+		}
+	}
+	return next
 }
 
-func (h *profdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func start(rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[ProfdemoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	flags := inputs.Profdemo.Flags
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
+	p := new(profiles)
+	rtx.SetDependency(running, p)
 	if flags.Cpuprofile != "" {
-		if h.cpu, err = os.Create(filepath.Join(rtx.Dir(), flags.Cpuprofile)); err != nil {
-			rtx.HaltWith(err)
-			return
+		if p.cpu, err = os.Create(filepath.Join(rtx.Dir(), flags.Cpuprofile)); err != nil {
+			return err
 		}
-		if err := pprof.StartCPUProfile(h.cpu); err != nil {
-			rtx.HaltWith(err)
-			return
+		if err := pprof.StartCPUProfile(p.cpu); err != nil {
+			return err
 		}
 	}
 	if flags.Trace != "" {
-		if h.trace, err = os.Create(filepath.Join(rtx.Dir(), flags.Trace)); err != nil {
-			rtx.HaltWith(err)
-			return
+		if p.trace, err = os.Create(filepath.Join(rtx.Dir(), flags.Trace)); err != nil {
+			return err
 		}
-		if err := trace.Start(h.trace); err != nil {
-			rtx.HaltWith(err)
+		if err := trace.Start(p.trace); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
-// CascadingPostRun runs after the command, even when it failed or panicked, so the profile
-// and the trace are always complete.
-func (h *profdemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	if h.cpu != nil {
+func (p *profiles) stop(rtx *rotini.Context) {
+	if p.cpu != nil {
 		pprof.StopCPUProfile()
-		if err := h.cpu.Close(); err != nil {
+		if err := p.cpu.Close(); err != nil {
 			rtx.RecordError(err)
 		}
 	}
-	if h.trace != nil {
+	if p.trace != nil {
 		trace.Stop()
-		if err := h.trace.Close(); err != nil {
+		if err := p.trace.Close(); err != nil {
 			rtx.RecordError(err)
 		}
 	}
 }
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
 
-func (*profdemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
+import (
+	cmd "example.com/profdemo/internal/cmd/profdemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		WithMiddleware(cmd.Profile).
+		Execute()
 }
 -- work.go.txt --
 package profdemo
@@ -115,30 +153,29 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*profdemoWorkHandler)(nil)
+var _ rotini.HandlerE = (*profdemoWorkHandler)(nil)
 
 type profdemoWorkHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*profdemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*profdemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[ProfdemoWorkInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	n := 0
 	for i := range 20_000_000 {
 		n += i % 7
 	}
 	if inputs.ProfdemoWork.Flags.Fail {
-		rtx.HaltWith(errors.New("failed on purpose"))
-		return
+		return errors.New("failed on purpose")
 	}
 	fmt.Fprintln(rtx.Stdout, "worked")
+	return nil
 }
 -- cmd/profdemo/.rotini.spec.yaml --
 version: 0.0.0
@@ -182,6 +219,7 @@ generate:
     - type: cmd
       file: internal/cmd/profdemo/zz_profdemo.go
       package: profdemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

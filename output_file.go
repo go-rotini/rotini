@@ -20,7 +20,7 @@ import (
 // commits what was written and Abort discards it. Both are idempotent, and Close after Abort
 // does nothing. The idiom commits only on success:
 //
-//	out, err := rotini.CreateOutput(rtx, in.Flags.Output, rotini.Overwrite(in.Flags.Force))
+//	out, err := rotini.CreateOutput(rtx, in.Flags.Output, rotini.OutputOverwrite(in.Flags.Force))
 //	if err != nil {
 //		return err
 //	}
@@ -32,10 +32,11 @@ import (
 type OutputFile struct {
 	mu        sync.Mutex
 	rtx       *Context
-	name      string    // the path as given
-	w         io.Writer // where writes go
-	file      *os.File  // nil when writing to stdout
-	tmp       string    // the temporary file Close renames onto target; "" for a direct write
+	name      string         // the path as given
+	w         io.Writer      // where writes go
+	file      io.WriteCloser // nil when writing to stdout
+	view      *osView        // the run's view, whose file system holds the file
+	tmp       string         // the temporary file Close renames onto target; "" for a direct write
 	target    string
 	overwrite bool
 	werr      error // the first write error
@@ -51,21 +52,28 @@ type outputConfig struct {
 	modeSet   bool
 }
 
-// Overwrite lets [CreateOutput] replace an existing file. Without it, or with
-// Overwrite(false), an existing file is a usage error. A command usually passes the value of
+// OutputOverwrite lets [CreateOutput] replace an existing file. Without it, or with
+// OutputOverwrite(false), an existing file is a usage error. A command usually passes the value of
 // a --force flag it declares:
 //
-//	rotini.CreateOutput(rtx, in.Flags.Output, rotini.Overwrite(in.Flags.Force))
-func Overwrite(enabled bool) OutputOption {
+//	rotini.CreateOutput(rtx, in.Flags.Output, rotini.OutputOverwrite(in.Flags.Force))
+func OutputOverwrite(enabled bool) OutputOption {
 	return func(c *outputConfig) { c.overwrite = enabled }
 }
 
-// FileMode sets the permissions of a file [CreateOutput] creates or replaces, before the
-// umask. The default is 0644 for a new file, and the replaced file's own permissions when
-// overwriting; FileMode(0o600) keeps secret output private.
-func FileMode(perm fs.FileMode) OutputOption {
+// OutputFileMode sets the permissions of a file [CreateOutput] creates or replaces, before the
+// umask. The default is 0644 for a new file (and for one a [LayerFS] shows from its lower
+// layer), and the replaced file's own permissions when overwriting; OutputFileMode(0o600) keeps
+// secret output private.
+func OutputFileMode(perm fs.FileMode) OutputOption {
 	return func(c *outputConfig) { c.mode, c.modeSet = perm.Perm(), true }
 }
+
+// Deprecated: use [OutputOverwrite].
+func Overwrite(enabled bool) OutputOption { return OutputOverwrite(enabled) }
+
+// Deprecated: use [OutputFileMode].
+func FileMode(perm fs.FileMode) OutputOption { return OutputFileMode(perm) }
 
 // CreateOutput opens an output-file value for writing (a spec's `type: outputfile`):
 //
@@ -74,11 +82,12 @@ func FileMode(perm fs.FileMode) OutputOption {
 //     Close. Abort, a failed write or a failed Close removes the temporary file and leaves an
 //     existing file untouched, and so does a run that ends with the file still open, by a
 //     return, a halt, a panic or a forced exit after a signal. A relative path is resolved
-//     against the run's directory ([Context.Dir]).
+//     against the run's directory ([Context.Dir]), and the file is written through the run's
+//     file system ([Program.WithFS]), which must be a [WriteFS].
 //   - An existing file that is not a regular file, such as /dev/null, a named pipe or NUL on
 //     Windows, is written directly, not atomically.
 //
-// An existing regular file is replaced only with [Overwrite](true); otherwise CreateOutput
+// An existing regular file is replaced only with [OutputOverwrite](true); otherwise CreateOutput
 // returns a usage error that matches [fs.ErrExist]. The check is repeated before the rename,
 // but a file created in between is still replaced. A symbolic link is followed, so the file
 // it points to is replaced and the link is kept; a link to a file that doesn't exist is a usage
@@ -106,11 +115,15 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 		return &OutputFile{rtx: rtx, name: path, w: rtx.Stdout}, nil
 	}
 
-	target := rtx.osView().abs(path)
-	info, err := os.Lstat(target)
+	view := rtx.osView()
+	target := view.abs(path)
+	if !view.writable() && view.fsFor(target) != nil {
+		return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), &fs.PathError{Op: "open", Path: target, Err: readOnlyError{}})
+	}
+	info, err := view.lstat(target)
 	exists := err == nil
 	if exists && info.Mode()&fs.ModeSymlink != 0 {
-		resolved, rerr := filepath.EvalSymlinks(target)
+		resolved, rerr := view.evalSymlinks(target)
 		if errors.Is(rerr, fs.ErrNotExist) {
 			return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a symbolic link to a file that doesn't exist", quotePath(path)), err: rerr})
 		}
@@ -118,7 +131,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 			return nil, outputOpenError(fmt.Sprintf("could not follow output file %s", quotePath(path)), rerr)
 		}
 		target = resolved
-		info, err = os.Stat(target)
+		info, err = view.stat(target)
 		exists = err == nil
 	}
 	switch {
@@ -126,11 +139,11 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a directory", quotePath(path))})
 	case exists && !info.Mode().IsRegular() && info.Mode()&fs.ModeSymlink == 0:
 		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
-		f, err := os.OpenFile(target, os.O_WRONLY, 0)
+		f, err := view.openFile(target, os.O_WRONLY, 0)
 		if err != nil {
 			return nil, outputOpenError(fmt.Sprintf("could not open output file %s", quotePath(path)), err)
 		}
-		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, target: target}), nil
+		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, view: view, target: target}), nil
 	case exists && !cfg.overwrite:
 		return nil, existsError(path)
 	}
@@ -140,23 +153,23 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	switch {
 	case cfg.modeSet:
 		perm = cfg.mode
-	case exists:
+	case exists && view.ownFile(target):
 		perm, keepMode = info.Mode().Perm(), true
 	}
-	f, tmp, err := createTemp(target, perm)
+	f, tmp, err := createTemp(view, target, perm)
 	if err != nil {
 		return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 	}
 	if keepMode {
 		// The temporary file was created through the umask; give it the replaced file's mode.
-		if err := f.Chmod(perm); err != nil {
+		if err := chmodFile(f, perm); err != nil {
 			_ = f.Close()
-			_ = os.Remove(tmp)
+			_ = view.remove(tmp)
 			return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 		}
 	}
 	return rtx.trackOutput(&OutputFile{
-		rtx: rtx, name: path, w: f, file: f, tmp: tmp, target: target, overwrite: cfg.overwrite,
+		rtx: rtx, name: path, w: f, file: f, view: view, tmp: tmp, target: target, overwrite: cfg.overwrite,
 	}), nil
 }
 
@@ -172,15 +185,15 @@ func outputOpenError(msg string, err error) error {
 }
 
 // createTemp creates a new file beside target, named after it, with perm before the umask.
-func createTemp(target string, perm fs.FileMode) (*os.File, string, error) {
+func createTemp(view *osView, target string, perm fs.FileMode) (io.WriteCloser, string, error) {
 	dir, base := filepath.Split(target)
 	for range 100 {
 		name := filepath.Join(dir, "."+base+"."+strconv.FormatUint(rand.Uint64(), 36)+".tmp")
-		f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+		f, err := view.openFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
-		return f, name, err //nolint:wrapcheck // wrapped by the caller
+		return f, name, err
 	}
 	return nil, "", errors.New("could not find a free temporary name")
 }
@@ -206,7 +219,7 @@ func (f *OutputFile) Name() string { return f.name }
 // Close commits the file: the temporary file is closed and renamed into place. If a write
 // failed, or closing or renaming fails (a full disk often shows only here), the temporary file
 // is removed, an existing file is left as it was, and the error is returned. Without
-// [Overwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
+// [OutputOverwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
 // returns the same usage error CreateOutput would. A file written directly (a device or a named
 // pipe) is only closed. Close on stdout, or after Close or Abort, does nothing.
 func (f *OutputFile) Close() error {
@@ -228,17 +241,17 @@ func (f *OutputFile) Close() error {
 		return nil
 	}
 	if err := cmp.Or(f.werr, cerr); err != nil {
-		_ = os.Remove(f.tmp)
+		_ = f.view.remove(f.tmp)
 		return &pathError{msg: fmt.Sprintf("could not write output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	if !f.overwrite {
-		if _, err := os.Lstat(f.target); err == nil {
-			_ = os.Remove(f.tmp)
+		if _, err := f.view.lstat(f.target); err == nil {
+			_ = f.view.remove(f.tmp)
 			return existsError(f.name)
 		}
 	}
-	if err := renameOutput(f.tmp, f.target); err != nil {
-		_ = os.Remove(f.tmp)
+	if err := renameOutput(f.view, f.tmp, f.target); err != nil {
+		_ = f.view.remove(f.tmp)
 		return &pathError{msg: fmt.Sprintf("could not replace output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
@@ -262,7 +275,7 @@ func (f *OutputFile) Abort() error {
 	if f.tmp == "" {
 		return nil
 	}
-	if err := os.Remove(f.tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := f.view.remove(f.tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return &pathError{msg: fmt.Sprintf("could not remove the temporary file for %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
@@ -350,13 +363,13 @@ func (rtx *Context) discardOutputs() {
 			continue
 		}
 		_ = f.file.Close() // Windows can't remove an open file
-		_ = os.Remove(f.tmp)
+		_ = f.view.remove(f.tmp)
 	}
 }
 
 // renameOutput moves a finished temporary file onto its target.
-func renameOutput(from, to string) error {
-	return retryRename(os.Rename, from, to, renameRetryable, time.Sleep)
+func renameOutput(view *osView, from, to string) error {
+	return retryRename(view.rename, from, to, renameRetryable, time.Sleep)
 }
 
 // retryRename renames, retrying up to five times with a growing pause (10ms to 160ms) while

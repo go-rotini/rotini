@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
 // fmtSchema is what `rotini fmt` needs from a JSON Schema object: the definition it is, its
@@ -103,21 +102,25 @@ type fmtSchemas struct {
 	spec, conf, command *fmtSchema
 }
 
-var loadFmtSchemas = sync.OnceValues(func() (*fmtSchemas, error) {
-	spec, err := buildFmtSchema(schemaSpecFileBytes, "")
-	if err != nil {
-		return nil, fmt.Errorf("read the spec schema: %w", err)
-	}
-	command, err := buildFmtSchema(schemaSpecFileBytes, "#/definitions/Command")
-	if err != nil {
-		return nil, fmt.Errorf("read the spec schema: %w", err)
-	}
-	conf, err := buildFmtSchema(schemaConfFileBytes, "")
-	if err != nil {
-		return nil, fmt.Errorf("read the conf schema: %w", err)
-	}
-	return &fmtSchemas{spec: spec, conf: conf, command: command}, nil
-})
+func loadFmtSchemas() (*fmtSchemas, error) {
+	return loadFmtSchemasOnce.value(func() (*fmtSchemas, error) {
+		spec, err := buildFmtSchema(schemaSpecFileBytes, "")
+		if err != nil {
+			return nil, fmt.Errorf("read the spec schema: %w", err)
+		}
+		command, err := buildFmtSchema(schemaSpecFileBytes, "#/definitions/Command")
+		if err != nil {
+			return nil, fmt.Errorf("read the spec schema: %w", err)
+		}
+		conf, err := buildFmtSchema(schemaConfFileBytes, "")
+		if err != nil {
+			return nil, fmt.Errorf("read the conf schema: %w", err)
+		}
+		return &fmtSchemas{spec: spec, conf: conf, command: command}, nil
+	})
+}
+
+var loadFmtSchemasOnce lazyErr[*fmtSchemas]
 
 // buildFmtSchema resolves the schema at ref ("" for the root) of the schema document data.
 func buildFmtSchema(data []byte, ref string) (*fmtSchema, error) {

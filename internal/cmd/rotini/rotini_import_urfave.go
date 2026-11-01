@@ -7,24 +7,23 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniImportUrfaveHandler)(nil)
+var _ rotini.HandlerE = (*rotiniImportUrfaveHandler)(nil)
 
 type rotiniImportUrfaveHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniImportUrfaveHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniImportUrfaveHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniImportUrfaveInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	args := inputs.RotiniImportUrfave.Arguments
 	flags := inputs.RotiniImportUrfave.Flags
-	runImport(ctx, rtx, codegen.ImportOptions{
+	return runImport(ctx, rtx, codegen.ImportOptions{
 		Framework: codegen.FrameworkURFave,
 		Package:   args.Package,
 		Root:      flags.Root,

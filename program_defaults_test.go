@@ -126,7 +126,7 @@ func TestProgram_withCompletionScriptNilIsAWiringError(t *testing.T) {
 func TestProgram_withParserReachesTheRun(t *testing.T) {
 	t.Parallel()
 	parser := NewParser()
-	var got *Parser
+	var got ArgvParser
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Parser() }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if _, err := p.WithParser(parser).Run(p.args); err != nil || got != parser {
@@ -180,7 +180,8 @@ func TestContext_nilReceiverExceptions(t *testing.T) {
 		"PartialInputs":    func() error { _, _, err := nilCtx.PartialInputs[in](); return err },
 		"ArgvInputs":       func() error { _, err := nilCtx.ArgvInputs[in](); return err },
 		"EnvInputs":        func() error { _, err := nilCtx.EnvInputs[in](); return err },
-		"FileInputs":       func() error { _, err := nilCtx.FileInputs[in](); return err },
+		"ConfigInputs":     func() error { _, err := nilCtx.ConfigInputs[in](); return err },
+		"FileInputs":       func() error { _, err := nilCtx.FileInputs[in](); return err }, // deprecated forwarder
 		"StdinInputs":      func() error { _, err := nilCtx.StdinInputs[in](); return err },
 		"DefaultInputs":    func() error { _, err := nilCtx.DefaultInputs[in](); return err },
 		"CheckInputs":      func() error { return nilCtx.CheckInputs(in{}, nil) },
@@ -240,7 +241,7 @@ func TestContext_withStdinFeedsFlagStdin(t *testing.T) {
 // signalCtx is a run context canceled the way rotini's signal trap cancels one.
 func signalCtx(code int) context.Context {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	cancel(exitCodeError{code: code, signal: true})
+	cancel(exitCodeError{code: code, signal: os.Interrupt})
 	return ctx
 }
 
@@ -250,7 +251,7 @@ func reportDefault(ctx context.Context, out Outcome, code int) (stdout, stderr s
 	rtx := p.newRunContext()
 	rtx.exitCode = code
 	rtx.setReporterStage(true)
-	defaultReporter(ctx, rtx, out)
+	DefaultReporter(ctx, rtx, out)
 	return o.String(), e.String(), rtx.code()
 }
 

@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"github.com/go-rotini/recon"
 	"strings"
 	"testing"
 )
@@ -34,7 +32,7 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			b := NewInputReader(InputSettings{})
-			srcs, err := b.readFileSource(nil, ConfigFile{Name: "cfg", Path: tc.in}, fileBootstrap{}, false, everyFeatureView())
+			srcs, err := b.readFileSource(nil, ConfigFileDef{Name: "cfg", Path: tc.in}, fileBootstrap{}, false, everyFeatureView())
 			if err != nil {
 				t.Fatalf("readFileSource(%q): %v", tc.in, err)
 			}
@@ -44,9 +42,9 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 			if named, wrapped := src.(namedSource); wrapped {
 				src = named.Source
 			}
-			fsrc, ok := src.(*recon.FileSource)
+			fsrc, ok := src.(fileDoc)
 			if !ok {
-				t.Fatalf("the config source is a %T, not a *recon.FileSource", src)
+				t.Fatalf("the config source is a %T, not a file source", src)
 			}
 			got := filepath.Clean(fsrc.Path())
 			if tc.want != "" && got != filepath.Clean(tc.want) {

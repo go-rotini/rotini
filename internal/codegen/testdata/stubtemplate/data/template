@@ -1,0 +1,29 @@
+package {{.Package}}
+
+// Package: {{printf "%#v" .Package}}
+// HandlerType: {{printf "%#v" .HandlerType}}
+// InputsType: {{printf "%#v" .InputsType}}
+// Invocation: {{printf "%#v" .Invocation}}
+// Prefix: {{printf "%#v" .Prefix}}
+// RuntimeImport: {{printf "%#v" .RuntimeImport}}
+// Header: {{printf "%#v" .Header}}
+// ErrorHooks: {{printf "%#v" .ErrorHooks}}
+// NewShape: {{printf "%#v" .NewShape}}
+// HelpFlag: {{printf "%#v" .HelpFlag}}
+// HelpFrame: {{printf "%#v" .HelpFrame}}
+// VersionFlag: {{printf "%#v" .VersionFlag}}
+// RootHook: {{printf "%#v" .RootHook}}
+// RootHelpFlag: {{printf "%#v" .RootHelpFlag}}
+// RootVersionFlag: {{printf "%#v" .RootVersionFlag}}
+// HelpPathArg: {{printf "%#v" .HelpPathArg}}
+// HelpPlugins: {{printf "%#v" .HelpPlugins}}
+// VersionOnly: {{printf "%#v" .VersionOnly}}
+// CompletionArg: {{printf "%#v" .CompletionArg}}
+// PrintHelpWhenBare: {{printf "%#v" .PrintHelpWhenBare}}
+// NeedsInputs: {{printf "%#v" .NeedsInputs}}
+// UsesInputs: {{printf "%#v" .UsesInputs}}
+// Redact: {{printf "%#v" .Redact}}
+
+var _ rotini.Handler = (*{{.HandlerType}})(nil)
+
+type {{.HandlerType}} struct{}

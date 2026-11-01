@@ -1,0 +1,5 @@
+warning: spec: .rotini.spec.yaml:8:16: command demo: the description is 72 characters long, more than validate.help_width (40); break or shorten it
+warning: spec: .rotini.spec.yaml:9:11: command demo: the footer, line 2, is 54 characters long, more than validate.help_width (40); break or shorten it
+warning: spec: .rotini.spec.yaml:14:12: command demo: example "demo --verbose --verbose --verbose --verbose" is 44 characters long, more than validate.help_width (40); break or shorten it
+warning: spec: .rotini.spec.yaml:15:16: command demo: the summary of example "demo --verbose --verbose --verbose --verbose" is 41 characters long, more than validate.help_width (40); break or shorten it
+warning: spec: .rotini.spec.yaml:18:16: command demo: the summary of flag "verbose" is 57 characters long, more than validate.help_width (40); break or shorten it

@@ -494,7 +494,7 @@ Use "acme help <command>" for more information about a command.
 the environment variables acme reads
 
 Environment:
-  ACME_ENV string    the target environment (default staging) (used by: acme deploy)
+  ACME_ENV string    the target environment (default staging, used by: acme deploy)
   DB_DSN url         the database to connect to (used by: acme db)
 -- want-services.txt --
 web	the website

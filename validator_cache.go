@@ -134,7 +134,11 @@ func schemaFailures(errs []jsonschema.ValidationError) *recon.MultiError {
 				walk(e.Causes)
 				continue
 			}
-			multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: e.Message, Cause: e})
+			msg := e.Message
+			if e.Keyword == "false" && strings.HasSuffix(e.KeywordLocation, "/additionalProperties") {
+				msg = unknownKeyMsg // a key its object's schema doesn't list
+			}
+			multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: msg, Cause: e})
 		}
 	}
 	walk(errs)
@@ -200,4 +204,70 @@ func typeFact(cache *sync.Map, v reflect.Value, fact func(reflect.Value) bool) b
 	got := fact(v)
 	cache.Store(t, got)
 	return got
+}
+
+// unknownKeyMsg is a schema check's message for a key its object's schema forbids
+// (`additionalProperties: false`).
+const unknownKeyMsg = "unknown key"
+
+// forbiddenKey reports whether ve is a key its object's schema forbids.
+func forbiddenKey(ve *recon.ValidationError) bool {
+	return ve.Rule == "false" && ve.Msg == unknownKeyMsg && len(ve.Path) > 0
+}
+
+// unknownFileKey is the usage error for a key in configuration file f, found at where, that
+// the file's schema forbids. Its Token and Candidates are the key and the keys its object's
+// schema declares, which [SuggestionFacts] reads.
+func unknownFileKey(f ConfigFileDef, where string, ve *recon.ValidationError, err error) *InputError {
+	key := ve.Path[len(ve.Path)-1]
+	known := schemaKeysAt(f.Schema, ve.Path[:len(ve.Path)-1])
+	msg := fmt.Sprintf("configuration file %s has unknown key %s", where, ve.Path.String())
+	if len(known) > 0 {
+		msg += " (keys: " + strings.Join(known, ", ") + ")"
+	}
+	e := usageBind(InputErrorKindUnknownKey, channelConfig, f.Name, msg, err)
+	e.Token, e.Candidates = key, known
+	return e
+}
+
+// schemaKeysAt is the property names, sorted, that the object at path in a document checked
+// against schema (a JSON Schema's text) declares, through properties, items and references to
+// its definitions; nil when there is no such object.
+func schemaKeysAt(schema string, path []string) []string {
+	var root map[string]any
+	if json.Unmarshal([]byte(schema), &root) != nil {
+		return nil
+	}
+	defs, _ := root["definitions"].(map[string]any)
+	resolve := func(n map[string]any) map[string]any {
+		for range len(defs) + 1 { // a chain of references, never a loop
+			ref, ok := n["$ref"].(string)
+			if !ok {
+				return n
+			}
+			next, ok := defs[strings.TrimPrefix(ref, "#/definitions/")].(map[string]any)
+			if !ok {
+				return nil
+			}
+			n = next
+		}
+		return n
+	}
+	n := resolve(root)
+	for _, seg := range path {
+		if n == nil {
+			return nil
+		}
+		props, _ := n["properties"].(map[string]any)
+		next, ok := props[seg].(map[string]any)
+		if !ok {
+			next, _ = n["items"].(map[string]any)
+		}
+		n = resolve(next)
+	}
+	if n == nil {
+		return nil
+	}
+	props, _ := n["properties"].(map[string]any)
+	return slices.Sorted(maps.Keys(props))
 }

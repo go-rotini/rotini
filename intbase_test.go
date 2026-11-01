@@ -147,10 +147,10 @@ func TestPrefixedBase_rejects(t *testing.T) {
 		{[]string{"--n=-_1"}, `app: --n: "-_1" is not a valid integer`},
 		{[]string{"--n", "0x"}, `app: --n: "0x" is not a valid integer`},
 		{[]string{"--n", "0b2"}, `app: --n: "0b2" is not a valid integer`},
-		{[]string{"--u8", "0x100"}, `app: --u8: "0x100" is not a valid uint8 (out of range: 0 to 255)`},
-		{[]string{"--u8=-0x1"}, `app: --u8: "-0x1" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u8", "0x100"}, `app: --u8: "0x100" is not a valid non-negative integer (out of range: 0 to 255)`},
+		{[]string{"--u8=-0x1"}, `app: --u8: "-0x1" is not a valid non-negative integer (out of range: 0 to 255)`},
 		{[]string{"--n", "0x10000000000000000"}, `app: --n: "0x10000000000000000" is not a valid integer`},
-		{[]string{"--ids", "0x1,0x1FF"}, `app: --ids: "0x1FF" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--ids", "0x1,0x1FF"}, `app: --ids: "0x1FF" is not a valid non-negative integer (out of range: 0 to 255)`},
 		{[]string{"--", "0xZ"}, `app: <nums>: "0xZ" is not a valid integer`},
 		{[]string{"--raw", "0x10"}, `app: --raw: "0x10" is not a valid integer`},
 		{[]string{"--raw", "1_000"}, `app: --raw: "1_000" is not a valid integer`},
@@ -246,7 +246,7 @@ func TestPrefixedBase_acquiredAndFallbacks(t *testing.T) {
 	read := func(env string) (inputs, error) {
 		var in inputs
 		rtx := NewContextFor(def, nil).WithEnviron([]string{env})
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	if in, err := read("N=0o17"); err != nil || in.App.Flags.N != 15 || in.App.Flags.M != 5 {
 		t.Errorf("fallbacks: %+v, %v", in.App.Flags, err)
@@ -281,7 +281,7 @@ func TestPrefixedBase_envAndConfigInputs(t *testing.T) {
 		var in ibChannelInputs
 		cfg := writeConfig(t, cfgBody)
 		rtx := NewContextFor(def, nil).WithEnviron(env)
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	in, err := read("mode: '0o755'\nbits: ['0b1', '010', 3]\ncount: 12\n", "PORT=0x1F", "MASKS=0xF:010:0b1", "PLAIN=7")
 	if err != nil {
@@ -306,8 +306,8 @@ func TestPrefixedBase_envAndConfigInputs(t *testing.T) {
 func TestPrefixedBase_configWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.yaml")
-	key := ConfigKey{Key: "mode", Type: "uint32", Base: basePrefixed}
-	rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{key}})
+	key := ConfigKeyDef{Key: "mode", Type: "uint32", Base: basePrefixed}
+	rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{key}})
 	if err := SetConfigValue(rtx, "app", "mode", "0o755"); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestPlainBase_envAndConfigAreDecimal(t *testing.T) {
 		var in ibDecimalInputs
 		cfg := writeConfig(t, cfgBody)
 		rtx := NewContextFor(def, nil).WithEnviron(env)
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	in, err := read("count: '010'\n", "PLAIN=010", "LIST=010,-007")
 	if err != nil {

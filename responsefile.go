@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"slices"
 	"strings"
 )
@@ -74,7 +73,7 @@ func hasResponseWord(argv []string, prefix string) bool {
 // readResponseFile reads the words of the response file at path, resolved against the run's
 // directory. The error says why in rotini's words, not the platform's.
 func readResponseFile(view *osView, path string) ([]string, error) {
-	f, err := os.Open(view.abs(path))
+	f, err := view.open(view.abs(path))
 	if err != nil {
 		return nil, responseFileProblem(err)
 	}

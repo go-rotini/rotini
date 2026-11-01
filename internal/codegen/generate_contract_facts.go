@@ -15,8 +15,9 @@ import (
 // schemaScope is the named schemas of one composed spec. A composed command's `$ref`s name
 // its own spec's schemas, not the root's.
 type schemaScope struct {
-	name    string // the spec's root command name
-	schemas map[string]Schema
+	name     string // the spec's root command name
+	schemas  map[string]Schema
+	channels []Channel // the spec's declared channels
 }
 
 // schemasOf returns the named schemas a command's `$ref`s resolve against.

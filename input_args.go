@@ -112,13 +112,13 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, label+" "+problem+fromSource(origin), nil)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, label+" "+problem+fromSource(origin), nil)
 	}
 	if vals, err = fallbackValues(val, ad.Separator); err != nil {
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %v", label, err)+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, fmt.Sprintf("%s: %v", label, err)+fromSource(origin), err)
 	}
 	vals = argEnum(&ad).canonical(vals)
 	if vals, err = expandFallbackWired(vals, sf.Tag, source, label, rd); err != nil {
@@ -128,7 +128,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, err.Error()+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, err.Error()+fromSource(origin), err)
 	}
 	probe := reflect.New(field.Type()).Elem()
 	if err := coerceTime(probe, vals, argTimeSpec(&ad, rd.view.clockRef())); err != nil {
@@ -141,7 +141,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if mistake, ok := asError[authorMistake](err); ok {
 			return nil, "", internalBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, mistake), err)
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, coerceMessage(err, ad.Secret))+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, coerceMessage(err, ad.Secret))+fromSource(origin), err)
 	}
 	if vals == nil {
 		vals = []string{} // supplied, and empty: still present
@@ -150,7 +150,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 }
 
 // recordArgFallbacks is reconcileArgs for the per-channel layers ([Context.EnvInputs],
-// [Context.FileInputs]): each argument whose fallback this layer supplies is bound, recorded as
+// [Context.ConfigInputs]): each argument whose fallback this layer supplies is bound, recorded as
 // present, and noted by position for the merged report, which places positionals in order.
 // origins names where each argument's value came from, by argument index.
 func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, layerName string, reg *recon.Registry, rd fallbackRead) (placed, origins map[int]string, err error) {

@@ -71,7 +71,7 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType}
 	withValueForms(&fd, schema)
 	// Measured-type bounds are checked here because lintDefaultConstraints cannot read "3s".
-	if measuredTypes[strings.TrimPrefix(getSchemaType(schema), "[]")] {
+	if measuredTypes()[strings.TrimPrefix(getSchemaType(schema), "[]")] {
 		fd.Constraints = rotini.Constraints{
 			Minimum: bound(schema.Minimum), Maximum: bound(schema.Maximum),
 			ExclusiveMinimum: bound(schema.ExclusiveMinimum), ExclusiveMaximum: bound(schema.ExclusiveMaximum),
@@ -124,34 +124,40 @@ func runtimeComplaint(msg, value string) string {
 
 // valueTypes maps resolved Go type spellings to their reflect.Type for the builtins and
 // rotini's own type vocabulary.
-var valueTypes = map[string]reflect.Type{
-	"time.Time": reflect.TypeFor[time.Time](),
-	"string":    reflect.TypeFor[string](), "bool": reflect.TypeFor[bool](),
-	"int": reflect.TypeFor[int](), "int8": reflect.TypeFor[int8](), "int16": reflect.TypeFor[int16](),
-	"int32": reflect.TypeFor[int32](), "int64": reflect.TypeFor[int64](),
-	"uint": reflect.TypeFor[uint](), "uint8": reflect.TypeFor[uint8](), "uint16": reflect.TypeFor[uint16](),
-	"uint32": reflect.TypeFor[uint32](), "uint64": reflect.TypeFor[uint64](),
-	"float32": reflect.TypeFor[float32](), "float64": reflect.TypeFor[float64](),
-	"byte": reflect.TypeFor[byte](), "rune": reflect.TypeFor[rune](),
-	"time.Duration":                reflect.TypeFor[time.Duration](),
-	"*time.Location":               reflect.TypeFor[*time.Location](),
-	"*url.URL":                     reflect.TypeFor[*url.URL](),
-	"mail.Address":                 reflect.TypeFor[mail.Address](),
-	"net.HardwareAddr":             reflect.TypeFor[net.HardwareAddr](),
-	"netip.Addr":                   reflect.TypeFor[netip.Addr](),
-	"netip.Prefix":                 reflect.TypeFor[netip.Prefix](),
-	"netip.AddrPort":               reflect.TypeFor[netip.AddrPort](),
-	rotiniPkgName + ".ByteSize":    reflect.TypeFor[rotini.ByteSize](),
-	rotiniPkgName + ".HexBytes":    reflect.TypeFor[rotini.HexBytes](),
-	rotiniPkgName + ".Base64Bytes": reflect.TypeFor[rotini.Base64Bytes](),
-	"*regexp.Regexp":               reflect.TypeFor[*regexp.Regexp](),
-	rotiniPkgName + ".Glob":        reflect.TypeFor[rotini.Glob](),
+func valueTypes() map[string]reflect.Type {
+	return valueTypesOnce.value(func() map[string]reflect.Type {
+		return map[string]reflect.Type{
+			"time.Time": reflect.TypeFor[time.Time](),
+			"string":    reflect.TypeFor[string](), "bool": reflect.TypeFor[bool](),
+			"int": reflect.TypeFor[int](), "int8": reflect.TypeFor[int8](), "int16": reflect.TypeFor[int16](),
+			"int32": reflect.TypeFor[int32](), "int64": reflect.TypeFor[int64](),
+			"uint": reflect.TypeFor[uint](), "uint8": reflect.TypeFor[uint8](), "uint16": reflect.TypeFor[uint16](),
+			"uint32": reflect.TypeFor[uint32](), "uint64": reflect.TypeFor[uint64](),
+			"float32": reflect.TypeFor[float32](), "float64": reflect.TypeFor[float64](),
+			"byte": reflect.TypeFor[byte](), "rune": reflect.TypeFor[rune](),
+			"time.Duration":                reflect.TypeFor[time.Duration](),
+			"*time.Location":               reflect.TypeFor[*time.Location](),
+			"*url.URL":                     reflect.TypeFor[*url.URL](),
+			"mail.Address":                 reflect.TypeFor[mail.Address](),
+			"net.HardwareAddr":             reflect.TypeFor[net.HardwareAddr](),
+			"netip.Addr":                   reflect.TypeFor[netip.Addr](),
+			"netip.Prefix":                 reflect.TypeFor[netip.Prefix](),
+			"netip.AddrPort":               reflect.TypeFor[netip.AddrPort](),
+			rotiniPkgName + ".ByteSize":    reflect.TypeFor[rotini.ByteSize](),
+			rotiniPkgName + ".HexBytes":    reflect.TypeFor[rotini.HexBytes](),
+			rotiniPkgName + ".Base64Bytes": reflect.TypeFor[rotini.Base64Bytes](),
+			"*regexp.Regexp":               reflect.TypeFor[*regexp.Regexp](),
+			rotiniPkgName + ".Glob":        reflect.TypeFor[rotini.Glob](),
+		}
+	})
 }
+
+var valueTypesOnce lazy[map[string]reflect.Type]
 
 // reflectTypeOf builds the reflect.Type for a resolved Go type spelling out of valueTypes,
 // through list, string-keyed map and pointer spellings.
 func reflectTypeOf(t string) (reflect.Type, bool) {
-	if rt, ok := valueTypes[t]; ok {
+	if rt, ok := valueTypes()[t]; ok {
 		return rt, true
 	}
 	if elem, ok := strings.CutPrefix(t, "[]"); ok {
@@ -338,13 +344,19 @@ func layoutProblem(layout string) string {
 
 // measuredTypes are the non-numeric types numeric bounds apply to, in their own unit
 // (nanoseconds, bytes). It mirrors a matching runtime table.
-var measuredTypes = map[string]bool{"time.Duration": true, rotiniPkgName + ".ByteSize": true}
+func measuredTypes() map[string]bool {
+	return measuredTypesOnce.value(func() map[string]bool {
+		return map[string]bool{"time.Duration": true, rotiniPkgName + ".ByteSize": true}
+	})
+}
+
+var measuredTypesOnce lazy[map[string]bool]
 
 // measuredValue parses text as a measured type's value in its unit using the runtime's
 // parser, so a bound like `1h30m` or `1.5Gi` reads exactly as the same value would.
 func measuredValue(goType, text string) (float64, bool) {
-	rt, ok := valueTypes[goType]
-	if !ok || !measuredTypes[goType] {
+	rt, ok := valueTypes()[goType]
+	if !ok || !measuredTypes()[goType] {
 		return 0, false
 	}
 	v, complaint := parseAsRuntime(rt, rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: goType}, text)

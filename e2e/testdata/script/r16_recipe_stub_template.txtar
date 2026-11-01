@@ -1,0 +1,127 @@
+# R16 — the "Your own handler stub" recipe: the cmd package's stub_template shapes every new
+# handler file and stub_test_template seeds a test beside each; the program builds and runs, the
+# seeded tests pass, and a seeded test is retired with its handler. The files are the ones the
+# guide shows.
+
+gomodinit example.com/tmpldemo
+
+exec rotini generate cmd/tmpldemo/.rotini.spec.yaml --config cmd/tmpldemo/.rotini.conf.yaml
+stdout 'created: internal/cmd/tmpldemo/tmpldemo_ship.go'
+stdout 'created: internal/cmd/tmpldemo/tmpldemo_ship_test.go'
+! stderr .
+
+# Each new handler file is the template's, with the logger field and the comment.
+grep '^// tmpldemoShipHandler runs `tmpldemo ship`.$' internal/cmd/tmpldemo/tmpldemo_ship.go
+grep '^	log \*slog.Logger$' internal/cmd/tmpldemo/tmpldemo_ship.go
+grep '^// rotini: seeded beside its handler file' internal/cmd/tmpldemo/tmpldemo_ship_test.go
+
+exec go mod tidy
+exec go build -o tmpldemo$exe ./cmd/tmpldemo
+exec ./tmpldemo$exe ship
+stderr 'msg=run command="tmpldemo ship"'
+
+# The seeded tests run every command.
+exec go test ./internal/cmd/tmpldemo
+stdout '^ok'
+
+# A seeded test is the author's to edit: generate never rewrites it, and while rotini's line stays
+# it still goes with its handler.
+cp edited_test.go.txt internal/cmd/tmpldemo/tmpldemo_ship_test.go
+exec rotini generate cmd/tmpldemo/.rotini.spec.yaml --config cmd/tmpldemo/.rotini.conf.yaml
+cmp internal/cmd/tmpldemo/tmpldemo_ship_test.go edited_test.go.txt
+
+# When ship leaves the spec, its test goes with its handler file: disabled, then deleted.
+cp spec_without_ship.yaml cmd/tmpldemo/.rotini.spec.yaml
+exec rotini generate cmd/tmpldemo/.rotini.spec.yaml --config cmd/tmpldemo/.rotini.conf.yaml
+stderr 'pruned tmpldemo_ship_test.go \(disabled; removed by the next generate\)'
+exec go test ./internal/cmd/tmpldemo
+stdout '^ok'
+exec rotini generate cmd/tmpldemo/.rotini.spec.yaml --config cmd/tmpldemo/.rotini.conf.yaml
+! exists internal/cmd/tmpldemo/tmpldemo_ship.go
+! exists internal/cmd/tmpldemo/tmpldemo_ship_test.go
+exists internal/cmd/tmpldemo/tmpldemo_test.go
+
+-- cmd/tmpldemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/tmpldemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/tmpldemo/zz_tmpldemo.go
+      hook_returns: error
+      stub_template: templates/handler.go.tmpl
+      stub_test_template: templates/handler_test.go.tmpl
+-- templates/handler.go.tmpl --
+package {{.Package}}
+
+import (
+	"cmp"
+	"context"
+	"log/slog"
+
+	{{.RuntimeImport}}
+)
+
+var _ rotini.HandlerE = (*{{.HandlerType}})(nil)
+
+// {{.HandlerType}} runs `{{.Invocation}}`.
+type {{.HandlerType}} struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+
+	log *slog.Logger
+}
+
+func (h *{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) error {
+	if _, err := rtx.Inputs[{{.InputsType}}](); err != nil {
+		return err
+	}
+	log := cmp.Or(h.log, slog.New(slog.NewTextHandler(rtx.Stderr, nil)))
+	log.Info("run", "command", "{{.Invocation}}")
+	return nil
+}
+-- templates/handler_test.go.tmpl --
+package {{.Package}}
+
+import (
+	"io"
+	"strings"
+	"testing"
+)
+
+func Test{{title .HandlerType}}(t *testing.T) {
+	var stderr strings.Builder
+	p := NewProgram().WithStdout(io.Discard).WithStderr(&stderr)
+	args := strings.Fields("{{.Invocation}}")[1:]
+	if code, err := p.Run(args); code != 0 || err != nil {
+		t.Fatalf("{{.Invocation}}: exit %d, %v", code, err)
+	}
+	if !strings.Contains(stderr.String(), "{{.Invocation}}") {
+		t.Errorf("{{.Invocation}} logged %q", stderr.String())
+	}
+}
+-- edited_test.go.txt --
+// rotini: seeded beside its handler file; delete this line to keep this test if the command leaves the spec.
+
+package tmpldemo
+
+import "testing"
+
+func TestShipIsMine(t *testing.T) {}
+-- cmd/tmpldemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: tmpldemo
+  summary: handlers from the team's template
+  commands:
+    - name: ship
+      summary: ship it
+-- spec_without_ship.yaml --
+version: 0.0.0
+command:
+  name: tmpldemo
+  summary: handlers from the team's template

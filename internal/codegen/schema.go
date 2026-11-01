@@ -5,7 +5,6 @@ package codegen
 import (
 	_ "embed"
 	"fmt"
-	"sync"
 
 	"github.com/go-rotini/jsonschema"
 )
@@ -23,15 +22,15 @@ var (
 
 // loadSpecSchema and loadConfSchema compile an embedded schema at most once per process,
 // so each new Processor reuses the result.
-var (
-	loadSpecSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
-		return compileSchema("spec", schemaSpecFileBytes)
-	})
+var specSchemaOnce, confSchemaOnce lazyErr[*jsonschema.Schema]
 
-	loadConfSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
-		return compileSchema("conf", schemaConfFileBytes)
-	})
-)
+func loadSpecSchema() (*jsonschema.Schema, error) {
+	return specSchemaOnce.value(func() (*jsonschema.Schema, error) { return compileSchema("spec", schemaSpecFileBytes) })
+}
+
+func loadConfSchema() (*jsonschema.Schema, error) {
+	return confSchemaOnce.value(func() (*jsonschema.Schema, error) { return compileSchema("conf", schemaConfFileBytes) })
+}
 
 // compileSchema compiles one embedded schema, labeling a failure with its kind. A failure
 // is a rotini build defect, not a user error.

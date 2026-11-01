@@ -832,3 +832,99 @@ func TestDiff_wrongShapeIsNotCalledNotJSON(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A command without its own exit_status is compared by the root's: a contract that lists only
+// own codes reads the same as one that writes the root's out, and replacing the root's codes
+// with an own list reports the ones lost.
+func TestDiff_inheritedExitStatus(t *testing.T) {
+	root := `{"name": "app", "path": [], "exit_status": [{"code": 1}, {"code": 2}, {"code": 3}]}`
+	ownOnly := contract(root + `, {"name": "app run", "path": ["run"]}`)
+	written := contract(root + `, {"name": "app run", "path": ["run"], "exit_status_inherited": true,
+	  "exit_status": [{"code": 1}, {"code": 2}, {"code": 3}]}`)
+	replaced := contract(root + `, {"name": "app run", "path": ["run"], "exit_status": [{"code": 4}]}`)
+
+	for _, pair := range [][2][]byte{{ownOnly, written}, {written, ownOnly}} {
+		r, err := Diff(pair[0], pair[1], Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lines(r); len(got) != 0 {
+			t.Errorf("an inherited list written out or not: findings %v, want none", got)
+		}
+	}
+	for _, old := range [][]byte{ownOnly, written} {
+		r, err := Diff(old, replaced, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 1",
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 2",
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 3",
+			"safe EXIT_STATUS_ADDED app run exit 4",
+		}
+		if got := lines(r); !slices.Equal(got, want) {
+			t.Errorf("findings:\n  got  %v\n  want %v", got, want)
+		}
+		for _, f := range r.Findings {
+			if f.Rule == RuleExitStatusNoDelete && !strings.Contains(f.Note, "replaces the root's") {
+				t.Errorf("%s at %s: note %q, want it to say the own list replaces the root's", f.Rule, f.Where, f.Note)
+			}
+		}
+	}
+}
+
+func TestDiff_channels(t *testing.T) {
+	ch := func(name, class, props string) string {
+		return `{"name": "` + name + `", "class": "` + class + `", "schema": {"type": "object", "required": ["path"], "properties": {` + props + `}}}`
+	}
+	channels := func(list ...string) string { return `"channels": [` + strings.Join(list, ", ") + `]` }
+	path := `"path": {"type": "string"}`
+	pathReason := path + `, "reason": {"type": "string"}`
+	runRaw(t, []rawCase{
+		{
+			name: "removed and added",
+			old:  contract(root(""), channels(ch("skipped", "info", path))),
+			new:  contract(root(""), channels(ch("noted", "info", path))),
+			want: []string{"breaking CHANNEL_NO_DELETE channel skipped", "safe CHANNEL_ADDED channel noted"},
+		},
+		{
+			name: "first channel",
+			old:  contract(root("")),
+			new:  contract(root(""), channels(ch("skipped", "info", path))),
+			want: []string{"safe CHANNEL_ADDED channel skipped"},
+		},
+		{
+			name: "record field removed and added, as an output",
+			old:  contract(root(""), channels(ch("skipped", "info", pathReason))),
+			new:  contract(root(""), channels(ch("skipped", "info", path+`, "size": {"type": "integer"}`))),
+			want: []string{"breaking OUTPUT_PROPERTY_NO_DELETE channel skipped.reason", "safe OUTPUT_PROPERTY_ADDED channel skipped.size"},
+		},
+		{
+			name: "class between non-error classes",
+			old:  contract(root(""), channels(ch("skipped", "info", path))),
+			new:  contract(root(""), channels(ch("skipped", "warning", path))),
+			want: []string{"possibly_breaking CHANNEL_CLASS_CHANGED channel skipped"},
+		},
+		{
+			name: "class to error",
+			old:  contract(root(""), channels(ch("skipped", "warning", path))),
+			new:  contract(root(""), channels(ch("skipped", "error", path))),
+			want: []string{"breaking CHANNEL_CLASS_CHANGED channel skipped"},
+		},
+		{
+			name: "an experimental program's channel",
+			old:  contract(root(`"stability": "experimental"`), channels(ch("skipped", "info", path))),
+			new:  contract(root(`"stability": "experimental"`)),
+			want: []string{"safe CHANNEL_NO_DELETE channel skipped"},
+		},
+		{
+			name: "a definition only a channel uses",
+			old: contract(root(""), `"channels": [{"name": "c", "class": "info", "schema": {"$ref": "#/definitions/R"}}]`,
+				`"definitions": {"R": {"type": "object", "properties": {"x": {"type": "string"}}}}`),
+			new: contract(root(""), `"channels": [{"name": "c", "class": "info", "schema": {"$ref": "#/definitions/R"}}]`,
+				`"definitions": {"R": {"type": "object", "properties": {}}}`),
+			want: []string{"breaking OUTPUT_PROPERTY_NO_DELETE definitions.R.x"},
+		},
+	})
+}

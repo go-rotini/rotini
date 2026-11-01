@@ -1,0 +1,126 @@
+# R16 — the generated cmd file names what the spec declares: a constant per enum value (a named
+# schema's typed by its type), per config file, key, profile and environment variable, field
+# doc comments from each input's summary, and a package comment from the root's. Generate warns
+# about a config call naming a file or key the spec doesn't declare, and leaves out a constant
+# a handler file already declares. The definition holds no calls, so the package has no init.
+
+gomodinit github.com/me/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+grep '^// Package todo implements the todo command: a tiny task list\.$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoListFormatJSON = "json"$' internal/cmd/todo/zz_todo.go
+grep '^\t// Deprecated: use json$' internal/cmd/todo/zz_todo.go
+grep '^\tStateDone State = "done"$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoConfigFileUser = "user"$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoConfigKeyServerPort = "server.port"$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoProfileProd = "prod"$' internal/cmd/todo/zz_todo.go
+grep '^\tTodoEnvToken = "TODO_TOKEN"$' internal/cmd/todo/zz_todo.go
+grep '^\t// how to print the list$' internal/cmd/todo/zz_todo.go
+! grep 'Inputs: rotiniTypeOf' internal/cmd/todo/zz_todo.go
+
+cp list.go.txt internal/cmd/todo/todo_list.go
+cp states.go.txt internal/cmd/todo/states.go
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+stderr 'internal/cmd/todo/todo_list.go:\d+: rotini.SetConfigValue names the config file "usr", which the spec doesn''t declare \(it declares "user"\)'
+stderr 'internal/cmd/todo/todo_list.go:\d+: rotini.SetConfigValue names the key "server.prot", which no input reads from config file "user"'
+stderr 'internal/cmd/todo/states.go declares StateOpen, the name of the generated constant for the enum value "open" of the schema State; generate leaves the constant out'
+! grep 'StateOpen State' internal/cmd/todo/zz_todo.go
+
+exec go mod tidy
+exec go vet ./...
+exec go run ./cmd/todo list --format json
+stdout '^json$'
+
+-- list.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*todoListHandler)(nil)
+
+type todoListHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TodoListInputs]()
+	if err != nil {
+		return err
+	}
+	if in.TodoList.Flags.Format == TodoListFormatJSON {
+		_, err = fmt.Fprintln(rtx.Stdout, TodoListFormatJSON)
+		return err
+	}
+	return save(rtx)
+}
+
+func save(rtx *rotini.Context) error {
+	if err := rotini.SetConfigValue(rtx, "usr", TodoConfigKeyServerPort, "8080"); err != nil {
+		return err
+	}
+	return rotini.SetConfigValue(rtx, TodoConfigFileUser, "server.prot", "8080", rotini.ConfigToProfile(TodoProfileProd))
+}
+-- states.go.txt --
+package todo
+
+// StateOpen is the author's own, declared before rotini generated one.
+const StateOpen State = "open"
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a tiny task list
+  env_prefix: TODO
+  config_files:
+    - name: user
+      path: todo.yaml
+      profiles: { under: profiles, select: profile }
+  schemas:
+    State:
+      type: string
+      enum: [open, done]
+  flags:
+    - name: profile
+      identifiers: [--profile]
+      cascading: true
+      schema: { type: string, enum: [dev, prod] }
+  env:
+    - name: token
+      summary: the API token
+  config:
+    - name: port
+      schema: { key: server.port, type: int }
+  commands:
+    - name: list
+      summary: list tasks
+      flags:
+        - name: format
+          summary: how to print the list
+          identifiers: [--format]
+          schema:
+            type: string
+            enum:
+              - { value: text, summary: one task a line }
+              - json
+              - { value: xml, deprecated: use json }
+        - name: state
+          identifiers: [--state]
+          schema: { $ref: '#/schemas/State' }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

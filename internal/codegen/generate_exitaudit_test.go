@@ -224,3 +224,68 @@ func (*demoCheckHandler) bail(c *rotini.Context) {
 		t.Errorf("warnings =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// TestExitAudit_inheritAddsToTheRoot pins that a command adding to the root's list with
+// `inherit: true` is audited against both, may use the root's constant for an inherited code,
+// and gets its own constant for a named exit status it lists by `$ref`.
+func TestExitAudit_inheritAddsToTheRoot(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
+command:
+  name: demo
+  exit_statuses:
+    conflict: { code: 5, summary: a newer version exists }
+  exit_status:
+    - { code: 1, summary: failed }
+    - { code: 3, name: busy, summary: locked }
+  commands:
+    - name: build
+      exit_status:
+        - inherit: true
+        - $ref: conflict
+    - name: check
+      exit_status:
+        - inherit: true
+        - { code: 3, name: dirty, summary: the tree is dirty }
+`)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+	gen := func() []error {
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	gen()
+	writeTestFile(t, filepath.Join(dir, "internal", "cmd", "demo"), "codes.go", `package demo
+
+import "github.com/go-rotini/rotini"
+
+func (*demoBuildHandler) bail(c *rotini.Context) {
+	c.Exit(1)
+	c.Exit(DemoExitBusy)
+	c.Exit(DemoBuildExitConflict)
+	c.Exit(7)
+}
+
+func (*demoCheckHandler) bail(c *rotini.Context) {
+	c.Exit(DemoCheckExitDirty)
+	c.Exit(DemoExitBusy)
+}
+`)
+	var got []string
+	for _, n := range gen() {
+		if strings.HasPrefix(n.Error(), "internal/") {
+			got = append(got, n.Error())
+		}
+	}
+	want := []string{
+		`internal/cmd/demo/codes.go:9: "demo build" exits with 7, which its exit_status doesn't list`,
+		`internal/cmd/demo/codes.go:14: "demo check" exits with DemoExitBusy, which belongs to "demo"; declare the code on this command and use its own constant`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("warnings =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}

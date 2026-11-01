@@ -24,15 +24,16 @@ func featureNeeds(def Definition, meta InputSettings, inputs ...reflect.Type) []
 
 // needs records which features a program needs.
 type needs struct {
-	plugins, respFiles, chdir, multicall                bool
-	stdin                                               []string
-	env, config, profiles, envFiles, fallbacks, expand  bool
-	homes                                               bool // a path may name another user's home ("~bob")
-	objects, schemas                                    bool
-	json, yaml, toml, jsonc, dotenv                     bool
-	bounds, unique, patterns, groups, deps, streamPaths bool
-	url, email, timezone, mac, ip, regexp               bool
-	visited                                             map[reflect.Type]bool
+	plugins, respFiles, chdir, multicall                 bool
+	stdin                                                []string
+	env, families, config, profiles, envFiles, fallbacks bool
+	expand                                               bool
+	homes                                                bool // a path may name another user's home ("~bob")
+	objects, schemas                                     bool
+	json, yaml, toml, jsonc, dotenv                      bool
+	bounds, unique, patterns, groups, deps, streamPaths  bool
+	times, url, email, timezone, mac, ip, regexp         bool
+	visited                                              map[reflect.Type]bool
 }
 
 // features lists the recorded needs in canonical order.
@@ -55,6 +56,7 @@ func (n *needs) features() []Feature {
 		out = append(out, Stdin(formats...))
 	}
 	add(n.env, Env)
+	add(n.families, NestedEnv)
 	add(n.config, ConfigFiles)
 	add(n.profiles, Profiles)
 	add(n.envFiles, EnvFiles)
@@ -74,6 +76,7 @@ func (n *needs) features() []Feature {
 	add(n.groups, FlagGroups)
 	add(n.deps, FlagDependencies)
 	add(n.streamPaths, StreamPaths)
+	add(n.times, TimeValues)
 	add(n.url, URLValues)
 	add(n.email, EmailValues)
 	add(n.timezone, TimeZoneValues)
@@ -133,9 +136,11 @@ func (n *needs) command(flags []FlagDef, args []ArgDef, groups []FlagGroup, deps
 			n.objects, n.json, n.yaml, n.schemas = true, true, true, true
 		}
 		n.declared(fd.Type, fd.Constraints)
+		n.timed(fd.Type, fd.Layout != "" || len(fd.Layouts) > 0 || fd.Relative != "")
 	}
 	for _, ad := range args {
 		n.declared(ad.Type, ad.Constraints)
+		n.timed(ad.Type, ad.Layout != "" || len(ad.Layouts) > 0 || ad.Relative != "")
 	}
 }
 
@@ -162,6 +167,14 @@ func (n *needs) declared(typ string, c Constraints) {
 		n.ip = true
 	case "regexp.Regexp":
 		n.regexp = true
+	}
+}
+
+// timed records that an input of declared type typ needs [TimeValues] when it is a time input
+// with a layout or relative form (declared).
+func (n *needs) timed(typ string, declared bool) {
+	if declared && strings.Contains(typ, "time.Time") {
+		n.times = true
 	}
 }
 
@@ -209,13 +222,14 @@ func (n *needs) settings(meta InputSettings) {
 		}
 		for _, k := range f.Keys {
 			n.declared(k.Type, k.Constraints) // a config write checks a key as the flag it is
+			n.timed(k.Type, k.Layout != "" || len(k.Layouts) > 0)
 		}
 	}
 }
 
 // fileFormat records the codec a configuration file decodes with: its format, else its
 // extension; every document codec when its path is chosen at run time.
-func (n *needs) fileFormat(f ConfigFile) {
+func (n *needs) fileFormat(f ConfigFileDef) {
 	format := f.Format
 	if format == "" {
 		name := f.Path
@@ -305,6 +319,12 @@ func (n *needs) fields(t reflect.Type, channel bool) {
 		if channel {
 			if c, ok := channelConstraints(f.Tag); ok {
 				n.constraints(c)
+			}
+			if isTimeField(f.Type) && !tagTimeSpec(f.Tag).plain() {
+				n.times = true
+			}
+			if f.Tag.Get("envnest") != "" {
+				n.families = true
 			}
 		}
 		ft := f.Type

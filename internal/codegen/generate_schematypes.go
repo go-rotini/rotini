@@ -71,11 +71,17 @@ func rotiniTypeName(typ string) bool {
 const goTypeHint = "x-rotini-go-type"
 
 // sizedNumbers are the number types JSON Schema writes as integer or number but Go keeps apart.
-var sizedNumbers = map[string]bool{
-	"int8": true, "int16": true, "int32": true, "int64": true,
-	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"float32": true,
+func sizedNumbers() map[string]bool {
+	return sizedNumbersOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"int8": true, "int16": true, "int32": true, "int64": true,
+			"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+			"float32": true,
+		}
+	})
 }
+
+var sizedNumbersOnce lazy[map[string]bool]
 
 // typeDoc is a schema as the JSON Schema the generated Go types are built from: [schemaToDoc]
 // then [jsonSchemaTypes], with each sized number type recorded under goTypeHint for
@@ -124,7 +130,7 @@ func sizedNumberType(typ string) bool {
 	if _, val, ok := splitMapType(typ); ok {
 		return sizedNumberType(val)
 	}
-	return sizedNumbers[typ]
+	return sizedNumbers()[typ]
 }
 
 // sizedNumberTypes rewrites the generated types so each field or type whose schema carries
