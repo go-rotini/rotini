@@ -673,6 +673,7 @@ method Program.WithMiddleware(mw ...Middleware) *Program
 method Program.WithOutputChecks(enabled bool) *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser ArgvParser) *Program
+method Program.WithPluginLookup(fn PluginLookup) *Program
 method Program.WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, func() error, error)) *Program
 method Program.WithReporter(fn Reporter) *Program
 method Program.WithReporterOnEmpty(on bool) *Program
@@ -799,6 +800,7 @@ type PluginDiscoveryDef struct
 type PluginDispatch struct
 type PluginError struct
 type PluginErrorKind int
+type PluginLookup func(binary, dir string) (path string, ok bool)
 type Presence map[FieldPath]InputSource
 type ProfilesDef struct
 type Program struct

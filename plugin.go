@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -348,11 +349,57 @@ func resolvePluginBinary(name, dir string, view *osView) (string, error) {
 		}
 		searched = append(searched, "the plugin path "+dir)
 	}
+	if view != nil && view.plugins != nil {
+		dir, err := view.getwd()
+		if err != nil {
+			dir = "" // the process's working directory, as exec.Cmd reads an empty Dir
+		}
+		if p, ok := view.plugins(name, dir); ok && p != "" {
+			return p, nil
+		}
+		searched = append(searched, "the program's plugin lookup")
+	}
 	if p, ok := view.lookPath(name); ok {
 		return p, nil
 	}
 	searched = append(searched, "PATH")
 	return "", fmt.Errorf("%q not found; searched %s", name, strings.Join(searched, ", then "))
+}
+
+// PluginLookup finds the executable for a plugin binary: binary is the name searched for (such
+// as "acme-deploy"), and dir is the run's directory. It returns the executable's path, and
+// false when it has none. See [Program.WithPluginLookup].
+type PluginLookup func(binary, dir string) (path string, ok bool)
+
+// WithPluginLookup adds a place to look for a plugin: after the host binary's directory and the
+// command's plugin path, and before PATH, the most general place. It applies to declared plugins
+// and to discovery tokens, in dispatch, [Command.LookPlugin] and plugin help; discovery's listing
+// of installed plugins doesn't use it, since a lookup finds one name and can't list. nil (the
+// default) adds nothing.
+//
+// A program run with `go tool` lives in Go's build cache, as does a plugin the module declares
+// as a tool, so neither is next to the other, and the module's pinned plugin should win over
+// whatever version PATH holds. A lookup can ask the go command:
+//
+//	p.WithPluginLookup(func(binary, dir string) (string, bool) {
+//		cmd := exec.Command("go", "tool", "-n", binary) // prints the tool's path, building it if needed
+//		cmd.Dir = dir
+//		out, err := cmd.Output()
+//		return strings.TrimSpace(string(out)), err == nil
+//	})
+func (p *Program) WithPluginLookup(fn PluginLookup) *Program {
+	p.view = p.view.withPluginLookup(fn)
+	return p
+}
+
+// withPluginLookup returns a copy of v that looks plugins up with fn after the standard search.
+func (v *osView) withPluginLookup(fn PluginLookup) *osView {
+	out := &osView{foldCase: runtime.GOOS == "windows"}
+	if v != nil {
+		*out = *v
+	}
+	out.plugins = fn
+	return out
 }
 
 // executableAt reports the path of the executable named name in dir, when one exists as a

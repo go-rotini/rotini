@@ -53,6 +53,7 @@ Commands:
   completion          print a shell completion script
   man                 print or install the man pages
   diff                compare two versions of a cli's contract
+  mcp                 serve a cli's tools over MCP and add it to MCP clients (rotini-mcp)
 
 Flags:
       --version    print version
@@ -767,6 +768,26 @@ Examples:
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
+
+## rotini mcp
+
+Runs [rotini-mcp](https://github.com/go-rotini/mcp), which serves a CLI's tools over MCP and
+adds that server to MCP clients. It's a plugin: `rotini mcp …` runs the `rotini-mcp` installed
+beside `rotini`, or, under `go tool rotini`, the one the module declares as a tool.
+
+{{< code title="Install it" language="console" open="true" collapsible="false" copy="true" >}}
+$ go install github.com/go-rotini/mcp/cmd/rotini-mcp@latest      # beside an installed rotini
+$ go get -tool github.com/go-rotini/mcp/cmd/rotini-mcp            # beside go tool rotini
+{{< /code >}}
+
+{{< code title="Use it" language="console" open="true" collapsible="false" copy="true" >}}
+$ rotini mcp serve ./bin/notes                   # serve tools/mcp.json, running ./bin/notes
+$ rotini mcp add claude-code ./bin/notes         # add that server to Claude Code
+$ rotini mcp list                                # the servers in every client
+$ rotini mcp remove claude-code notes
+{{< /code >}}
+
+`rotini help mcp` prints its help.
 
 ## rotini help
 

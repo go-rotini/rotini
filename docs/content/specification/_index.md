@@ -261,7 +261,7 @@ Auto-expose external '&lt;prefix&gt;\*' executables as plugin sub-commands of th
 
 `string`
 
-Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. A relative path is resolved against the run's directory; $VAR references and then a leading ~ are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. A relative path is resolved against the run's directory; $VAR references and then a leading ~ are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is the same for both: next to the host binary, then this directory, then PATH (a program's Program.WithPluginLookup is asked before PATH) — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 
 #### `timeout`
 
@@ -964,7 +964,7 @@ Function-name prefix the package exports per command: codegen delegates this com
 
 `string` · **required**
 
-Name of the declared plugin. The dispatched binary is named &lt;program&gt;-&lt;name&gt;, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree &lt;program&gt; is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
+Name of the declared plugin. The dispatched binary is named &lt;program&gt;-&lt;name&gt;, and is searched for next to the host binary, then in the command's plugin_path, then on PATH (a program's Program.WithPluginLookup is asked before PATH). Inside a $ref-composed subtree &lt;program&gt; is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
 
 ### `aliases`
 

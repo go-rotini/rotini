@@ -816,3 +816,6 @@ command:
             required: [breaking, possibly_breaking, expected, safe, accepted]
         description: Every change between the contracts, the acknowledgements that matched none, and the counts.
         required: [findings, unmatched_accepts, summary]
+  plugins:
+    - name: mcp
+      summary: serve a cli's tools over MCP and add it to MCP clients (rotini-mcp)

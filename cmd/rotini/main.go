@@ -18,5 +18,7 @@ func main() {
 	cmd.NewProgram().
 		WithVersion(cmd.ResolveVersion(version)).
 		WithBufferedOutput(true).
+		WithPluginLookup(cmd.GoToolPlugin).
+		WithReporter(cmd.Report).
 		Execute()
 }

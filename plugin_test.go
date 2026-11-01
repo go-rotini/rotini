@@ -553,3 +553,63 @@ func TestPluginDispatch_searchPath(t *testing.T) {
 		}
 	}
 }
+
+// A plugin is found by the program's lookup, which sees the binary name and the run's
+// directory: after the host binary's directory and the plugin path, before PATH. A failed
+// lookup is named in the not-found error.
+func TestWithPluginLookup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a shell-script stand-in for a plugin cannot run on Windows; see e2e r9_plugins")
+	}
+	hidden := filepath.Join(t.TempDir(), "cached-app-ext")
+	if err := os.WriteFile(hidden, []byte("#!/bin/sh\necho \"looked up: $*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runDir := t.TempDir()
+	var asked []string
+	lookup := func(binary, dir string) (string, bool) {
+		asked = append(asked, binary+" in "+dir)
+		if binary == "app-ext" {
+			return hidden, true
+		}
+		return "", false
+	}
+	def := Definition{Name: "app", Handler: "App", Plugins: []PluginDef{
+		{Name: "ext", Binary: "app-ext"},
+		{Name: "gone", Binary: "app-gone-nothing-here"},
+	}}
+
+	// The lookup wins over a copy on PATH.
+	writeFakeBinary(t, "app-ext", "#!/bin/sh\necho on path\n")
+	p, out, errb := pluginProgram(def, []string{"ext", "hi"})
+	p.WithPluginLookup(lookup).WithDir(runDir)
+	if code, _ := p.Run(p.args); code != 0 {
+		t.Fatalf("run = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if got := strings.TrimSpace(out.String()); got != "looked up: hi" {
+		t.Errorf("plugin output = %q, want the lookup's copy", got)
+	}
+	if want := "app-ext in " + runDir; len(asked) != 1 || asked[0] != want {
+		t.Errorf("lookup asked %q, want [%q]", asked, want)
+	}
+
+	p, _, errb = pluginProgram(def, []string{"gone"})
+	p.WithPluginLookup(lookup)
+	if code, _ := p.Run(p.args); code == 0 || !strings.Contains(errb.String(), "the program's plugin lookup, then PATH") {
+		t.Errorf("a plugin the lookup lacks: exit %d, stderr %q", code, errb)
+	}
+
+	// The plugin path comes first: a copy there never reaches the lookup.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "app-ext"), []byte("#!/bin/sh\necho in plugin path\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withPath := def
+	withPath.PluginPath = dir
+	asked = nil
+	p, out, _ = pluginProgram(withPath, []string{"ext"})
+	p.WithPluginLookup(lookup)
+	if code, _ := p.Run(p.args); code != 0 || strings.TrimSpace(out.String()) != "in plugin path" || len(asked) != 0 {
+		t.Errorf("plugin path copy: exit %d, output %q, lookup asked %q", code, out, asked)
+	}
+}

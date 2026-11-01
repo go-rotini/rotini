@@ -4172,8 +4172,9 @@ command:
   unless `hidden: true` is set, but the generated help can't list them, since they aren't known
   when you generate.
 - **Both are searched for in the same order:** next to the program's own binary, then in
-  `plugin_path` (relative to the working directory), then on `PATH`. A binary that isn't found
-  is reported with the places searched:
+  `plugin_path` (relative to the working directory), then on `PATH`. A program can add a place
+  before `PATH` with `WithPluginLookup` (see below). A binary that isn't found is reported with
+  the places searched:
 
   ```console
   $ plug absent
@@ -4211,6 +4212,25 @@ for _, p := range rtx.CommandChain()[0].DiscoveredPlugins() {
 	fmt.Fprintf(rtx.Stdout, "  %s\t%s\n", p.Name, p.Path)
 }
 {{< /code >}}
+
+`WithPluginLookup` adds a place to look, asked after the binary's directory and `plugin_path`
+and before `PATH`, with the binary's name and the run's directory. It suits a program run with
+`go tool`, which lives in Go's build cache, as does a plugin its module declares as a tool;
+asking the go command finds the module's pinned plugin rather than whatever `PATH` holds:
+
+```go
+cmd.NewProgram().
+	WithPluginLookup(func(binary, dir string) (string, bool) {
+		c := exec.Command("go", "tool", "-n", binary) // prints the tool's path, building it if needed
+		c.Dir = dir
+		out, err := c.Output()
+		return strings.TrimSpace(string(out)), err == nil
+	}).
+	Execute()
+```
+
+The companion uses it: `rotini mcp …` runs `rotini-mcp`, installed beside `rotini` or declared
+as a tool of the module.
 
 `LookPlugin(name)` reports which binary a plugin would run, searching where dispatch searches.
 `PluginDiscoveryErrors()` returns what went wrong scanning `plugin_path`, such as a directory that
