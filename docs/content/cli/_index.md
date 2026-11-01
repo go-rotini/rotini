@@ -781,8 +781,10 @@ $ go get -tool github.com/go-rotini/mcp/cmd/rotini-mcp            # beside go to
 {{< /code >}}
 
 {{< code title="Use it" language="console" open="true" collapsible="false" copy="true" >}}
-$ rotini mcp serve ./bin/notes                   # serve tools/mcp.json, running ./bin/notes
-$ rotini mcp add claude-code ./bin/notes         # add that server to Claude Code
+$ rotini mcp serve                               # build the program from source and serve tools/mcp.json
+$ rotini mcp add claude-code                     # add that server to Claude Code
+$ rotini mcp serve ./bin/notes                   # or serve a built program
+$ rotini mcp add claude-code ./bin/notes
 $ rotini mcp list                                # the servers in every client
 $ rotini mcp remove claude-code notes
 {{< /code >}}

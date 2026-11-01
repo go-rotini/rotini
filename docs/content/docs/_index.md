@@ -3435,7 +3435,9 @@ Examples:
 {{< /code >}}
 
 A command's `metadata` labels ride in its MCP tool's `_meta["dev.rotini/metadata"]`, beside
-`_meta["dev.rotini/invoke"]`, so a server or client can read them.
+`_meta["dev.rotini/invoke"]`, so a server or client can read them. The document's own
+`_meta["dev.rotini/program"]` names the program and its main package, relative to the module
+root (`{"name": "todo", "main": "./cmd/todo"}`), so a server can build it from source.
 
 Env and config inputs are never parameters; on a server they come from its environment. A
 command whose required input can't be a parameter is left out with a warning, unless it is a
