@@ -1,4 +1,9 @@
 {
+  "_meta": {
+    "dev.rotini/program": {
+      "name": "taskr"
+    }
+  },
   "tools": [
     {
       "_meta": {

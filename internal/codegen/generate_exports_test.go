@@ -371,3 +371,21 @@ command:
 		}
 	}
 }
+
+// The MCP tools document names the program and its main package, relative to the module root,
+// for a server that builds the program from source. Without a main package it names only the
+// program.
+func TestToolsMCP_program(t *testing.T) {
+	program := func(dir string) map[string]any {
+		meta, _ := readJSON(t, filepath.Join(dir, "tools", "mcp.json")).(map[string]any)["_meta"].(map[string]any)
+		prog, _ := meta["dev.rotini/program"].(map[string]any)
+		return prog
+	}
+	if got := program(generateSpecModule(t, exportsSpec, exportsConf)); len(got) != 1 || got["name"] != "app" {
+		t.Errorf("without a main package: %v", got)
+	}
+	withMain := strings.Replace(exportsConf, "  packages:\n", "  packages:\n    - type: main\n      file: cmd/app/main.go\n", 1)
+	if got := program(generateSpecModule(t, exportsSpec, withMain)); got["name"] != "app" || got["main"] != "./cmd/app" {
+		t.Errorf("with a main package: %v", got)
+	}
+}

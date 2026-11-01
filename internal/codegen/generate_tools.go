@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,9 +23,12 @@ import (
 
 // toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under, and
 // toolsMetadataKey the one its command's `metadata` labels live under.
+// toolsProgramKey is the tools document's own `_meta` key, which names the program and its
+// main package.
 const (
 	toolsMetaKey     = "dev.rotini/invoke"
 	toolsMetadataKey = "dev.rotini/metadata"
+	toolsProgramKey  = "dev.rotini/program"
 )
 
 // Tool name limits per target.
@@ -135,7 +139,7 @@ func renderToolExports(p *program, f *Feature, a *agentProgram, _ *template.Temp
 		var more []error
 		switch target {
 		case "mcp":
-			doc = mcpTools(tools)
+			doc = mcpTools(tools, p.toolsProgram())
 		case "openai-strict":
 			doc, more = openAITools(tools)
 		case "gemini":
@@ -600,9 +604,24 @@ func (t tool) inputSchema(defsKey string) map[string]any {
 
 // ─── mcp ────────────────────────────────────────────────────────────────────────.
 
-// mcpTools renders the tools as an MCP tools/list result. A tool's input examples are its
-// input schema's `examples`.
-func mcpTools(tools []tool) map[string]any {
+// toolsProgram names the program the tools run and, when the conf declares one, its main
+// package as a path relative to the module root ("./cmd/todo"), so a server can build the
+// program from source.
+func (p *program) toolsProgram() map[string]any {
+	prog := map[string]any{"name": p.rootName}
+	if m := p.conf.Generate.mainPkg(); m != nil && m.File != "" {
+		dir := path.Dir(slashClean(m.File))
+		if dir != "." {
+			dir = "./" + dir
+		}
+		prog["main"] = dir
+	}
+	return prog
+}
+
+// mcpTools renders the tools as an MCP tools/list result, with prog under its `_meta`. A
+// tool's input examples are its input schema's `examples`.
+func mcpTools(tools []tool, prog map[string]any) map[string]any {
 	list := make([]any, 0, len(tools))
 	for _, t := range tools {
 		in := t.inputSchema("$defs")
@@ -632,7 +651,7 @@ func mcpTools(tools []tool) map[string]any {
 		}
 		list = append(list, m)
 	}
-	return map[string]any{"tools": list}
+	return map[string]any{"_meta": map[string]any{toolsProgramKey: prog}, "tools": list}
 }
 
 // mcpAnnotations maps effects onto MCP tool annotations; nil when the command declares none,
