@@ -248,8 +248,10 @@ func optimalStringAlignment(a, b string) int {
 		return max(lenA, lenB)
 	}
 	// Three rows of the distance matrix are all a transposition looks back on: the row two
-	// above (prev2), the one above (prev) and the current one (cur).
-	prev2, prev, cur := make([]int, lenB+1), make([]int, lenB+1), make([]int, lenB+1)
+	// above (prev2), the one above (prev) and the current one (cur). The cap above bounds a
+	// row, so they are fixed arrays sliced to length rather than allocations sized by input.
+	var rows [3][maxSuggestRunes + 1]int
+	prev2, prev, cur := rows[0][:lenB+1], rows[1][:lenB+1], rows[2][:lenB+1]
 	for j := range prev {
 		prev[j] = j
 	}
