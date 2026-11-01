@@ -224,10 +224,17 @@ func nearness(a, b string) float64 {
 // runeLength is the length of s in runes.
 func runeLength(s string) int { return len([]rune(s)) }
 
+// maxSuggestRunes caps the strings optimalStringAlignment compares. A word longer than this is
+// no near miss of anything a CLI declares, and the distance's cost grows with the product of the
+// two lengths, so a longer string scores as entirely unlike instead.
+const maxSuggestRunes = 256
+
 // optimalStringAlignment returns the Optimal String Alignment distance (restricted
 // Damerau–Levenshtein): single-rune insertions, deletions and substitutions, plus transposition
 // of two adjacent runes, with no substring edited more than once. Counting a transposition as
-// one edit ("isntall" → "install") is what distinguishes it from Levenshtein.
+// one edit ("isntall" → "install") is what distinguishes it from Levenshtein. When either string
+// is longer than maxSuggestRunes, it returns the longer length, as for two strings with nothing in
+// common.
 func optimalStringAlignment(a, b string) int {
 	aRunes, bRunes := []rune(a), []rune(b)
 	lenA, lenB := len(aRunes), len(bRunes)
@@ -237,25 +244,28 @@ func optimalStringAlignment(a, b string) int {
 	if lenB == 0 {
 		return lenA
 	}
-	matrix := make([][]int, lenA+1)
-	for i := range lenA + 1 {
-		matrix[i] = make([]int, lenB+1)
-		matrix[i][0] = i
+	if lenA > maxSuggestRunes || lenB > maxSuggestRunes {
+		return max(lenA, lenB)
 	}
-	for j := range lenB + 1 {
-		matrix[0][j] = j
+	// Three rows of the distance matrix are all a transposition looks back on: the row two
+	// above (prev2), the one above (prev) and the current one (cur).
+	prev2, prev, cur := make([]int, lenB+1), make([]int, lenB+1), make([]int, lenB+1)
+	for j := range prev {
+		prev[j] = j
 	}
 	for i := 1; i <= lenA; i++ {
+		cur[0] = i
 		for j := 1; j <= lenB; j++ {
 			cost := 1
 			if aRunes[i-1] == bRunes[j-1] {
 				cost = 0
 			}
-			matrix[i][j] = min(matrix[i-1][j]+1, matrix[i][j-1]+1, matrix[i-1][j-1]+cost)
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
 			if i > 1 && j > 1 && aRunes[i-1] == bRunes[j-2] && aRunes[i-2] == bRunes[j-1] {
-				matrix[i][j] = min(matrix[i][j], matrix[i-2][j-2]+1)
+				cur[j] = min(cur[j], prev2[j-2]+1)
 			}
 		}
+		prev2, prev, cur = prev, cur, prev2
 	}
-	return matrix[lenA][lenB]
+	return prev[lenB]
 }

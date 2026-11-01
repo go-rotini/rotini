@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"errors"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -411,4 +412,67 @@ func FuzzSuggest(f *testing.F) {
 			}
 		}
 	})
+}
+
+// referenceOSA is the full-matrix Optimal String Alignment distance the rolling-row version in
+// optimalStringAlignment must equal for every input under maxSuggestRunes.
+func referenceOSA(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	m := make([][]int, len(ar)+1)
+	for i := range m {
+		m[i] = make([]int, len(br)+1)
+		m[i][0] = i
+	}
+	for j := range m[0] {
+		m[0][j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			m[i][j] = min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+cost)
+			if i > 1 && j > 1 && ar[i-1] == br[j-2] && ar[i-2] == br[j-1] {
+				m[i][j] = min(m[i][j], m[i-2][j-2]+1)
+			}
+		}
+	}
+	return m[len(ar)][len(br)]
+}
+
+func TestOptimalStringAlignment_matchesFullMatrix(t *testing.T) {
+	t.Parallel()
+	r := rand.New(rand.NewPCG(1, 2))
+	alphabets := []string{"ab", "abc", "abcdé", "xyzω"}
+	word := func(alphabet []rune) string {
+		n := r.IntN(12)
+		out := make([]rune, n)
+		for i := range out {
+			out[i] = alphabet[r.IntN(len(alphabet))]
+		}
+		return string(out)
+	}
+	for range 20000 {
+		alphabet := []rune(alphabets[r.IntN(len(alphabets))])
+		a, b := word(alphabet), word(alphabet)
+		if got, want := optimalStringAlignment(a, b), referenceOSA(a, b); got != want {
+			t.Fatalf("optimalStringAlignment(%q, %q) = %d, want %d", a, b, got, want)
+		}
+	}
+}
+
+func TestOptimalStringAlignment_longInputScoresAsUnlike(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("a", maxSuggestRunes+1)
+	if got := optimalStringAlignment(long, "a"); got != len(long) {
+		t.Errorf("distance = %d, want %d", got, len(long))
+	}
+	if got := nearness(long, long[:len(long)-1]); got != 0 {
+		t.Errorf("nearness = %v, want 0 for a string past the cap", got)
+	}
+	at := strings.Repeat("a", maxSuggestRunes)
+	if got := optimalStringAlignment(at, at[:len(at)-1]); got != 1 {
+		t.Errorf("distance at the cap = %d, want 1", got)
+	}
 }
