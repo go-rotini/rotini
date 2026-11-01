@@ -69,7 +69,7 @@
       }
     },
     {
-      "description": "delete finished tasks\n\nEffects: destructive, idempotent.\n\nExit codes: 75 (busy, retryable): the list is locked.",
+      "description": "delete finished tasks\n\nEffects: destructive, idempotent.\n\nSet the dry_run parameter to true to preview it without changing anything.\n\nSet the yes parameter to true to go ahead: without it the command refuses or asks for confirmation, which a tool call can't answer.\n\nExit codes: 75 (busy, retryable): the list is locked.",
       "name": "taskr_purge",
       "parametersJsonSchema": {
         "additionalProperties": false,

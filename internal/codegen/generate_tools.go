@@ -51,6 +51,7 @@ type tool struct {
 	cmd         agentCommand
 	name, title string
 	description string
+	serverEnv   []string // what the server's environment must supply, for re-rendering the description
 	properties  map[string]any
 	order       []string // parameter names in declaration order
 	required    []string
@@ -213,7 +214,8 @@ func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string, 
 	}
 	t.defs = reachableContractDefs(t.properties, a.doc.Definitions)
 	t.setOutput(cmd, wrapOutput)
-	t.description = toolDescription(c, serverEnv)
+	t.serverEnv = serverEnv
+	t.description = toolDescription(c, serverEnv, t.roleParams(nil))
 	return t, "", nil
 }
 
@@ -420,9 +422,26 @@ func isObjectSchema(s, defs map[string]any) bool {
 	return s["type"] == "object"
 }
 
+// roleParams names the tool's parameters for its dry-run and confirm flags, by role, as rename
+// writes them (nil: as declared); a flag kept out of the tool has none.
+func (t *tool) roleParams(rename func(string) string) map[string]string {
+	params := map[string]string{}
+	for name, f := range t.invoke.Flags {
+		if f.Role == "dry-run" || f.Role == "confirm" {
+			if rename != nil {
+				name = rename(name)
+			}
+			params[f.Role] = name
+		}
+	}
+	return params
+}
+
 // toolDescription is the text a model reads about a tool: what the command does, how settled
-// it is, its effects, what the server's environment must supply, and its exit codes.
-func toolDescription(c agentCommand, serverEnv []string) string {
+// it is, its effects, how to preview or confirm it, what the server's environment must supply,
+// and its exit codes. The model doesn't read the invocation facts, so the dry-run and confirm
+// parameters are named here.
+func toolDescription(c agentCommand, serverEnv []string, roleParams map[string]string) string {
 	cmd := c.c
 	var parts []string
 	if cmd.Summary != "" {
@@ -442,6 +461,12 @@ func toolDescription(c agentCommand, serverEnv []string) string {
 	}
 	if c.toolEffects != nil {
 		parts = append(parts, "Effects: "+effectsText(c.toolEffects)+".")
+	}
+	if p := roleParams["dry-run"]; p != "" {
+		parts = append(parts, "Set the "+p+" parameter to true to preview it without changing anything.")
+	}
+	if p := roleParams["confirm"]; p != "" {
+		parts = append(parts, "Set the "+p+" parameter to true to go ahead: without it the command refuses or asks for confirmation, which a tool call can't answer.")
 	}
 	if len(serverEnv) > 0 {
 		parts = append(parts, "Requires "+strings.Join(slices.Compact(slices.Sorted(slices.Values(serverEnv))), ", ")+" in the server's environment.")
@@ -906,6 +931,9 @@ func geminiName() *regexp.Regexp {
 
 var geminiNameOnce lazy[*regexp.Regexp]
 
+// geminiParam is a parameter's name in gemini.json: '-' written '_'.
+func geminiParam(name string) string { return strings.ReplaceAll(name, "-", "_") }
+
 // geminiTools renders the tools as Gemini function declarations, with JSON Schema parameters
 // (parametersJsonSchema). References are inlined unless a schema is recursive, and parameter
 // names have '-' written '_' (dry-run is dry_run).
@@ -927,7 +955,7 @@ func geminiTools(tools []tool) (any, []error) {
 		props, _ := params["properties"].(map[string]any)
 		renamed := map[string]any{}
 		for name, s := range props {
-			g := strings.ReplaceAll(name, "-", "_")
+			g := geminiParam(name)
 			if !geminiName().MatchString(g) {
 				notices = append(notices, fmt.Errorf("tools: %q's parameter %q breaks Gemini's parameter-name rule (letters, digits and _, at most 64)", t.cmd.invocation, name))
 			}
@@ -941,11 +969,12 @@ func geminiTools(tools []tool) (any, []error) {
 		if req, ok := params["required"].([]any); ok {
 			for i, r := range req {
 				if name, ok := r.(string); ok {
-					req[i] = strings.ReplaceAll(name, "-", "_")
+					req[i] = geminiParam(name)
 				}
 			}
 		}
-		list = append(list, map[string]any{"name": t.name, "description": describedExamples(t.description, t.shown), "parametersJsonSchema": params})
+		desc := toolDescription(t.cmd, t.serverEnv, t.roleParams(geminiParam))
+		list = append(list, map[string]any{"name": t.name, "description": describedExamples(desc, t.shown), "parametersJsonSchema": params})
 	}
 	return map[string]any{"functionDeclarations": list}, notices
 }
