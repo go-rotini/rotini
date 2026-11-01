@@ -57,8 +57,8 @@ const (
 //     working directory and file system a run reads, [Program.WithEnviron], [Program.WithDir] and
 //     [Program.WithFS]; the clock
 //     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
-//     wait after a signal, and [Program.WithArgv0] sets the name a multicall program dispatches
-//     on
+//     wait after a signal, [Program.WithArgv0] sets the name a multicall program dispatches
+//     on, and [Program.WithPluginLookup] adds a place to find plugins
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter],
 //     [Program.WithReporterOnEmpty] to report runs that recorded nothing; [Program.Reporter]
 //     returns the reporter a run uses

@@ -26,6 +26,7 @@ type osView struct {
 	input    *inputEnv         // what inputs read beyond env: .env files and variable_file values
 	files    *fileCache        // the configuration files one read of the inputs has opened; nil opens each time
 	fsys     fs.FS             // the run's file system (see Program.WithFS); nil is the operating system's
+	plugins  PluginLookup      // finds a plugin the standard search doesn't (see Program.WithPluginLookup)
 }
 
 // newOSView indexes env (exec.Cmd.Env's KEY=value form; later duplicates win). A nil env reads
@@ -62,11 +63,12 @@ func (v *osView) withEnviron(env []string) *osView {
 	dir, goos := "", runtime.GOOS
 	var clock *runClock
 	var fsys fs.FS
+	var plugins PluginLookup
 	if v != nil {
-		dir, clock, fsys = v.dir, v.clock, v.fsys
+		dir, clock, fsys, plugins = v.dir, v.clock, v.fsys, v.plugins
 	}
 	out := newOSView(env, dir, goos)
-	out.clock, out.fsys = clock, fsys
+	out.clock, out.fsys, out.plugins = clock, fsys, plugins
 	return out
 }
 

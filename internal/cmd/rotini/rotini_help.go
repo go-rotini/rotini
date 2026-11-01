@@ -23,6 +23,9 @@ func (*rotiniHelpHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	topic := inputs.RotiniHelp.Arguments.Command
+	if rtx.PluginHelp(topic...) {
+		return nil
+	}
 	help, err := Help(topic...)
 	if err != nil {
 		return inputError(err)
